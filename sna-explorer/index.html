@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SNA Explorer Retweet dan Reply</title>
+<title>SNA Explorer Politik Islam Digital</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -144,7 +144,7 @@ tr.sel td{background:var(--accent-soft)}
       <img src="assets/logo-nsi.jpg" alt="Network Society Indonesia" class="logo" width="167" height="62">
       <span class="brand-rule" aria-hidden="true"></span>
       <div>
-      <h1>SNA Explorer · Jaringan Retweet &amp; Reply</h1>
+      <h1>SNA Explorer · Politik Islam Digital</h1>
       <div class="sub">Jaringan berarah <span style="font-family:var(--f-mono)">author → target_user</span>, bobot edge = jumlah interaksi. Degree, betweenness, PageRank, komunitas Louvain.</div>
       </div>
     </div>
@@ -468,6 +468,7 @@ function rebuild(){
     for(const r of rows){ cnt[r.t]=(cnt[r.t]||0)+1; authors.add(r.a); }
     for(const type of NETS){ const net=buildNet(type,rows); computeMetrics(net); S.nets[type]=net; }
     S.summary={rows:rows.length,total:S.rows.length,cnt,authors:authors.size,undated};
+    if(S.nets[S.net].g.order===0){ const alt=NETS.find(t=>S.nets[t].g.order>0); if(alt){ S.net=alt; $('segNet').querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x.dataset.net===alt)); } }
     const dt=Math.round(performance.now()-t0);
     const sk=S.nets.retweet.skipped+S.nets.reply.skipped;
     const dateNote = (S.dFrom!=null && undated) ? ` ${fmtInt(undated)} baris tanpa created_at valid dikeluarkan oleh filter tanggal.` : '';
@@ -476,7 +477,7 @@ function rebuild(){
       (S.nets.retweet.betwSkipped||S.nets.reply.betwSkipped?' Betweenness dilewati karena graf terlalu besar; <button class="btn" id="forceB" type="button">hitung tetap</button>':'');
     status(msg, (sk||S.parseNote||dateNote)?'warn':'');
     const fb=$('forceB'); if(fb) fb.onclick=()=>{ for(const t of NETS){ const n=S.nets[t]; n.forceBetw=true; status('Menghitung betweenness…'); } setTimeout(()=>{ for(const t of NETS){ const n=S.nets[t]; const b=L.metrics.centrality.betweenness(n.g,{getEdgeWeight:null,normalized:true}); for(const k in b) n.M[k].betw=b[k]||0; n.betwSkipped=false; } status('Betweenness selesai dihitung.'); renderAll(false); },30); };
-    $('dataPill').textContent = S.source.startsWith('Contoh') ? 'contoh sintetis' : 'data unggahan';
+    $('dataPill').textContent = S.source.startsWith('Contoh') ? 'contoh sintetis' : (S.source.startsWith('Data penelitian') ? 'data nyata · sampel TikTok 1 Nov 2026' : 'data unggahan');
     $('dataPill').className = 'pill' + (S.source.startsWith('Contoh') ? '' : ' live');
     const maxN=Math.max(S.nets.retweet.g.order,S.nets.reply.g.order,20);
     const mx=$('maxNodes'); mx.max=Math.max(20,Math.ceil(maxN/10)*10);

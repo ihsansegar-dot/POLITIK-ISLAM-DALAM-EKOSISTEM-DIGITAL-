@@ -7,3 +7,6 @@ ANON_SALT_RAHASIA.txt
 __pycache__/
 .pytest_cache/
 *.zip
+
+# Data nyata di aplikasi (berisi teks komentar): jangan di repo publik
+sna-explorer/data/

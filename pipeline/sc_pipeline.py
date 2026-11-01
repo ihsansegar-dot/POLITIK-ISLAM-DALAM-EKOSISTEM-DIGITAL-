@@ -387,14 +387,14 @@ def cmd_build(cfg, run_ids=None):
             if not items:
                 unknown_struct[ep] += 1
             for cm in items:
-                rows = [(cm, None)] + [(r, cm) for r in (cm.get("replies") or [])]
+                rows = [(cm, None)] + [(r, cm) for r in (cm.get("replies") or cm.get("reply_comment") or [])]
                 for c_, parent in rows:
                     u = c_.get("user") or c_.get("author") or {}
                     uid = u.get("id") or u.get("pk") or u.get("uid") or u.get("channelId")
                     uh = u.get("username") or u.get("unique_id") or u.get("name")
                     if not (uid or uh):
                         unknown_struct[ep + ":no_author"] += 1; continue
-                    cid = c_.get("id") or c_.get("cid")
+                    cid = c_.get("id") or c_.get("cid") or f'{c_.get("aweme_id")}-{c_.get("create_time")}-{u.get("uid") or uh}'
                     if cid and (platform, cid) in comments:
                         audit["duplikat_komentar_dilewati"] += 1; continue
                     aid = acct(platform, uid, (uh or "").lstrip("@"))
