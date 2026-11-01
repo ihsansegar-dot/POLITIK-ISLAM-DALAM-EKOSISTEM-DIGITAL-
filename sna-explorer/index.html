@@ -87,6 +87,14 @@ canvas#g.hovering{cursor:pointer}
 .gcount{position:absolute;left:10px;top:8px;font-size:12px;color:var(--muted);font-family:var(--f-mono);pointer-events:none}
 .zoom{position:absolute;right:10px;top:8px;display:flex;flex-direction:column;gap:4px}
 .zoom button{width:30px;height:30px;border:1px solid var(--line);border-radius:6px;background:var(--panel);cursor:pointer;font-size:16px;line-height:1}
+.pop{position:absolute;z-index:5;width:300px;max-height:min(440px,calc(100% - 20px));overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.18);padding:12px 14px;font-size:13px;display:grid;gap:8px}
+.pop[hidden]{display:none}
+.pop .ph{display:flex;align-items:flex-start;gap:8px}
+.pop .ph b{font:600 15px var(--f-display);display:block}
+.pop .ph a{font-family:var(--f-mono);font-size:12.5px;color:var(--accent);word-break:break-all}
+.pop .x{margin-left:auto;border:1px solid var(--line);background:var(--panel);border-radius:6px;width:26px;height:26px;cursor:pointer;flex:none}
+.pop .tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:999px;padding:1px 8px;margin:0 4px 0 0;color:var(--muted)}
+.pop .cm{margin:0;border-left:2px solid var(--line);padding-left:7px;font-size:12.5px}
 .tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:7px 9px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.12);display:none;max-width:240px}
 .tip b{font-family:var(--f-mono);font-weight:500}
 .busy{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:var(--halo);font-weight:600;color:var(--muted)}
@@ -233,6 +241,7 @@ tr.sel td{background:var(--accent-soft)}
         <label for="fParty">Partai (pemilik akun seed)</label>
         <select id="fParty"></select>
       </div>
+      <label class="chk" id="realWrap" style="display:none"><input type="checkbox" id="showReal" checked> Tampilkan nama akun asli (matikan untuk tangkapan layar publikasi)</label>
       <label class="chk"><input type="checkbox" id="selfLoop" checked> Abaikan self-loop (aktor me-retweet/membalas dirinya)</label>
       <div class="grp">
         <span class="lbl">Ekspor</span>
@@ -260,6 +269,7 @@ tr.sel td{background:var(--accent-soft)}
           <button type="button" id="zFit" aria-label="Sesuaikan ke layar">⤢</button>
         </div>
         <div class="tip" id="tip"></div>
+        <div class="pop" id="pop" role="dialog" aria-label="Keterangan akun" hidden></div>
         <div class="busy" id="busy">Menghitung layout…</div>
       </div>
       <div class="legend-note">Ukuran node = PageRank · warna = komunitas Louvain · arah panah = author → target_user · ketebalan edge = jumlah interaksi. Klik node untuk menyorot tetangganya; klik area kosong untuk melepas.</div>
@@ -341,6 +351,8 @@ function status(msg, kind){ const el=$('status'); el.className='status'+(kind?' 
 
 /* ---------- parsing ---------- */
 const NETS = ['retweet','reply','mention'];
+const REAL = new Map(), REAL_BY_HANDLE = new Map(); let SHOW_REAL = true;
+function lab(id){ const r=REAL.get(id); if(SHOW_REAL && r && r.handle) return '@'+r.handle; return (S.names&&S.names.get(id))||id; }
 const VERB = {retweet:['me-retweet','di-retweet'], reply:['membalas/mengomentari','dibalas/dikomentari'], mention:['menyebut (mention)','disebut']};
 const TYPE_MAP = {mention:'mention', comment:'reply', retweet:'retweet', rt:'retweet', retweeted:'retweet', repost:'retweet', reply:'reply', replied:'reply', balasan:'reply', tweet:'tweet', original:'tweet', post:'tweet', quote:'quote'};
 function normUser(u){ return String(u||'').trim().replace(/^@+/,'').toLowerCase(); }
@@ -384,8 +396,8 @@ function buildNet(type, rows){
     if(!r.targets.length){ skipped++; continue; }
     for(const tg of r.targets){
       if(tg===r.a){ selfLoops++; if(S.dropSelf) continue; }
-      if(!g.hasNode(r.a)) g.addNode(r.a,{label:S.names.get(r.a)||r.a});
-      if(!g.hasNode(tg)) g.addNode(tg,{label:S.names.get(tg)||tg});
+      if(!g.hasNode(r.a)) g.addNode(r.a,{label:lab(r.a)});
+      if(!g.hasNode(tg)) g.addNode(tg,{label:lab(tg)});
       if(g.hasEdge(r.a,tg)) g.updateEdgeAttribute(r.a,tg,'weight',w=>w+1);
       else g.addEdge(r.a,tg,{weight:1});
       interactions++;
@@ -655,7 +667,7 @@ function resize(){
   ctx.setTransform(dpr,0,0,dpr,0,0); draw();
 }
 new ResizeObserver(resize).observe($('cwrap'));
-const zoom=d3.zoom().scaleExtent([0.05,20]).on('zoom',ev=>{S.transform=ev.transform; draw();});
+const zoom=d3.zoom().scaleExtent([0.05,20]).on('zoom',ev=>{S.transform=ev.transform; if(ev.sourceEvent && /move|wheel/.test(ev.sourceEvent.type)) hidePop(); draw();});
 d3.select(canvas).call(zoom).on('dblclick.zoom',null);
 function fit(animate){
   if(!S.layout||!S.layout.nodes.length){ draw(); return; }
@@ -765,7 +777,38 @@ canvas.addEventListener('click',ev=>{
   if(downAt && Math.hypot(ev.clientX-downAt[0],ev.clientY-downAt[1])>4) return;
   const r=canvas.getBoundingClientRect(); const n=pick(ev.clientX-r.left, ev.clientY-r.top);
   S.selected = n; renderInsight(); renderTables(); draw();
+  if(n) showPop(n, ev.clientX-r.left, ev.clientY-r.top); else hidePop();
 });
+function hidePop(){ $('pop').hidden=true; }
+function showPop(n, x, y){
+  const net=S.nets[S.net], m=net.M[n], g=net.g, info=REAL.get(n)||{};
+  const official=/_official$/.test(n);
+  const party=official? n.split('_')[0].toUpperCase() : [...new Set(S.rows.filter(r=>r.a===n&&r.party).map(r=>r.party))].join(', ');
+  const plat=[...new Set(S.rows.filter(r=>(r.a===n||r.targets.includes(n))&&r.plat).map(r=>r.plat))].join(', ');
+  const texts=filteredRows().filter(r=>r.a===n && r.text).slice(0,5);
+  const received=filteredRows().filter(r=>r.targets.includes(n)).length;
+  const showName=SHOW_REAL && info.handle;
+  const el=$('pop');
+  el.innerHTML=`<div class="ph"><span class="dot" style="background:${commColor(m.comm)};margin-top:5px"></span><div>
+      <b>${esc(showName? (info.nickname||'@'+info.handle) : n)}</b>
+      ${showName? `<a href="${esc(info.profile_url)}" target="_blank" rel="noopener">@${esc(info.handle)}</a>` : ''}
+      ${showName? `<div class="small">ID pseudonim: <span style="font-family:var(--f-mono)">${esc(n)}</span></div>`:''}
+    </div><button type="button" class="x" aria-label="Tutup" id="popX">×</button></div>
+   <div><span class="tag">${official?'Akun resmi partai':(info.verified_reason?esc(info.verified_reason):'Akun publik')}</span>${party?`<span class="tag">${esc(party)}</span>`:''}${plat?`<span class="tag">${esc(plat)}</span>`:''}<span class="tag">K${m.comm+1}</span></div>
+   <div class="mgrid">
+     <div><span>Interaksi diterima</span><b>${fmtInt(m.win)} dari ${fmtInt(m.indeg)} akun</b></div>
+     <div><span>Interaksi dikirim</span><b>${fmtInt(m.wout)} ke ${fmtInt(m.outdeg)} akun</b></div>
+     <div><span>PageRank</span><b>${fmtDec(m.pr,4)}</b></div>
+     <div><span>Betweenness</span><b>${net.betwSkipped?'–':fmtDec(m.betw,4)}</b></div>
+   </div>
+   ${texts.length?`<div class="small">Teks yang ditulis akun ini (${fmtInt(texts.length)} dari ${fmtInt(filteredRows().filter(r=>r.a===n&&r.text).length)})</div>${texts.map(r=>`<p class="cm">${esc(r.text.slice(0,240))}${r.text.length>240?'…':''}<br><span class="small">${r.ts?new Date(r.ts).toLocaleString('id-ID',{dateStyle:'medium',timeStyle:'short'}):''}</span></p>`).join('')}`
+     : (official?`<div class="small">Menerima ${fmtInt(received)} interaksi pada data yang ditampilkan.</div>`:`<div class="small">Tidak ada teks dari akun ini.</div>`)}`;
+  el.hidden=false;
+  const W2=$('cwrap').clientWidth, H2=$('cwrap').clientHeight;
+  el.style.left=Math.max(8,Math.min(x+16,W2-312))+'px'; el.style.top=Math.max(8,Math.min(y-20,H2-el.offsetHeight-8))+'px';
+  $('popX').onclick=hidePop;
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') hidePop(); });
 $('zIn').onclick=()=>d3.select(canvas).transition().duration(250).call(zoom.scaleBy,1.4);
 $('zOut').onclick=()=>d3.select(canvas).transition().duration(250).call(zoom.scaleBy,1/1.4);
 $('zFit').onclick=()=>fit(true);
@@ -797,7 +840,8 @@ $('selfLoop').onchange=e=>{ S.dropSelf=e.target.checked; rebuild(); };
 function onDate(){ const f=$('dFrom').value, t=$('dTo').value; S.dFrom=f?Date.parse(f+'T00:00:00Z'):null; S.dTo=t?Date.parse(t+'T23:59:59.999Z'):null; rebuild(); }
 $('dFrom').onchange=onDate; $('dTo').onchange=onDate;
 $('search').onchange=e=>{
-  const q=normUser(e.target.value); const net=S.nets[S.net]; if(!net) return;
+  let q=normUser(e.target.value); const net=S.nets[S.net]; if(!net) return;
+  if(!net.g.hasNode(q) && REAL_BY_HANDLE.has(q)) q=REAL_BY_HANDLE.get(q);
   if(net.g.hasNode(q)){
     if(S.layout && !S.layout.pos.has(q)) status(`Akun <b>${esc(q)}</b> ada di jaringan tetapi tidak termasuk ${fmtInt(S.maxNodes)} node teratas yang ditampilkan. Metriknya tetap ditampilkan di panel kanan.`,'warn');
     selectNode(q,true);
@@ -929,7 +973,12 @@ if(!L||!G||!window.Papa||!window.JSZip){ status('Pustaka gagal dimuat. Muat ulan
 $('fPlat').onchange=e=>{ S.fPlat=e.target.value; rebuild(); };
 $('fParty').onchange=e=>{ S.fParty=e.target.value; rebuild(); };
 // Dataset bawaan: bila artifact memuat data/default.csv, pakai itu; bila tidak ada, pakai contoh sintetis.
-fetch('data/default.csv',{cache:'no-store'}).then(r=>r.ok?r.text():Promise.reject(r.status))
+$('showReal').onchange=e=>{ SHOW_REAL=e.target.checked; hidePop(); rebuild(); };
+fetch('data/names.csv',{cache:'no-store'}).then(r=>r.ok?r.text():'').catch(()=>'').then(t=>{
+  if(t){ Papa.parse(t,{header:true,skipEmptyLines:true}).data.forEach(r=>{ if(!r.id) return; const id=r.id.toLowerCase(); REAL.set(id,r); if(r.handle) REAL_BY_HANDLE.set(r.handle.toLowerCase(),id); });
+         if(REAL.size) $('realWrap').style.display=''; }
+  return fetch('data/default.csv',{cache:'no-store'});
+}).then(r=>r.ok?r.text():Promise.reject(r.status))
   .then(t=>ingest(t,'Data penelitian (default.csv)'))
   .catch(()=>ingest(sampleCSV(),'Contoh data sintetis (akun fiktif)'));
 })();
