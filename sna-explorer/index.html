@@ -95,6 +95,18 @@ canvas#g.hovering{cursor:pointer}
 .gcount{position:absolute;left:10px;top:8px;font-size:12px;color:var(--muted);font-family:var(--f-mono);pointer-events:none}
 .zoom{position:absolute;right:10px;top:8px;display:flex;flex-direction:column;gap:4px}
 .zoom button{width:30px;height:30px;border:1px solid var(--line);border-radius:6px;background:var(--panel);cursor:pointer;font-size:16px;line-height:1}
+.geo svg{width:100%;height:auto;display:block;background:var(--bg);border-radius:8px}
+.geo .land{fill:var(--line);stroke:var(--panel);stroke-width:.4}
+.geo .bub{fill-opacity:.75;stroke:var(--panel);stroke-width:1;cursor:pointer}
+.geo .bub.sel{stroke:var(--ink);stroke-width:2}
+.geo .tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.geo .tabs button{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:4px;font-size:12px;cursor:pointer}
+.geo .tabs button[aria-pressed="true"]{border-color:var(--ink);font-weight:600}
+.geo ol{margin:0;padding:0;list-style:none;display:grid;gap:3px;max-height:220px;overflow:auto}
+.geo li button{all:unset;cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:6px;width:100%;font-size:12.5px;padding:2px 4px;border-radius:4px;box-sizing:border-box}
+.geo li button:hover,.geo li button[aria-pressed="true"]{background:var(--accent-soft)}
+.geo li .v{font-family:var(--f-mono);color:var(--muted)}
+.geo .gbar{height:3px;border-radius:2px;background:var(--accent);grid-column:1/-1;opacity:.6}
 .pop{position:absolute;z-index:5;width:300px;max-height:min(440px,calc(100% - 20px));overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.18);padding:12px 14px;font-size:13px;display:grid;gap:8px}
 .pop[hidden]{display:none}
 .pop .ph{display:flex;align-items:flex-start;gap:8px}
@@ -284,7 +296,15 @@ tr.sel td{background:var(--accent-soft)}
       <div class="legend-note">Ukuran node = PageRank · warna = komunitas Louvain · arah panah = author → target_user · ketebalan edge = jumlah interaksi. Klik node untuk menyorot tetangganya; klik area kosong untuk melepas.</div>
     </div>
 
-    <aside class="panel right" aria-label="Komunitas dan insight node">
+    <aside class="panel right" aria-label="Sebaran, komunitas, dan insight node">
+      <section class="geo grp" aria-label="Sebaran lokasi">
+        <h2>Sebaran lokasi</h2>
+        <svg id="geoMap" viewBox="0 0 300 120" role="img" aria-label="Peta sebaran penyebutan lokasi di Indonesia"></svg>
+        <div class="small" style="display:flex;gap:8px;flex-wrap:wrap">Warna = partai dominan: <span><span class="dot" style="background:#e0533d;width:8px;height:8px"></span> PKS</span><span><span class="dot" style="background:#24a06b;width:8px;height:8px"></span> PKB</span><span><span class="dot" style="background:#d9931a;width:8px;height:8px"></span> PPP</span><span><span class="dot" style="background:#2f6fd6;width:8px;height:8px"></span> PAN</span></div>
+        <div class="small" id="geoNote">Lokasi = nama tempat yang disebut dalam teks komentar, caption, atau nama akun, bukan lokasi pengguna.</div>
+        <div class="tabs" id="geoTabs"><button type="button" data-t="lok" aria-pressed="true">Lokasi</button><button type="button" data-t="akun" aria-pressed="false">Akun</button><button type="button" data-t="tag" aria-pressed="false">Hashtag</button></div>
+        <ol id="geoList"></ol>
+      </section>
       <h2>Komunitas</h2>
       <div class="small" id="commMeta"></div>
       <div class="comm-list" id="commList"></div>
@@ -511,7 +531,7 @@ function rebuild(){
 }
 
 function renderAll(relayout){
-  renderKpis(); renderComms(); renderTables(); renderInsight(); fillDatalist();
+  renderKpis(); renderComms(); renderTables(); renderInsight(); fillDatalist(); if(typeof buildGeo==='function') buildGeo();
   if(relayout) doLayout(); else draw();
 }
 
@@ -720,7 +740,8 @@ function draw(){
   const focus=S.selected||S.hover;
   let nb=null; if(focus && net.g.hasNode(focus)){ nb=new Set([focus]); net.g.forEachNeighbor(focus,x=>nb.add(x)); }
   const fc=S.focusComm;
-  const dim=n=> (nb && !nb.has(n)) || (fc!=null && net.M[n].comm!==fc);
+  const gf=window.__geoFocus||null;
+  const dim=n=> (nb && !nb.has(n)) || (fc!=null && net.M[n].comm!==fc) || (gf && !gf.has(n));
   const maxW=lay.edges.length?lay.edges[lay.edges.length-1].w:1;
   const showArrows = t.k>0.9 || lay.nodes.length<=120;
   let shownE=0;
@@ -998,11 +1019,125 @@ if(!L||!G||!window.Papa||!window.JSZip){ status('Pustaka gagal dimuat. Muat ulan
 $('fPlat').onchange=e=>{ S.fPlat=e.target.value; rebuild(); };
 $('fParty').onchange=e=>{ S.fParty=e.target.value; rebuild(); };
 // Dataset bawaan: bila artifact memuat data/default.csv, pakai itu; bila tidak ada, pakai contoh sintetis.
+
+/* ---------- geo: penyebutan lokasi (gazetir provinsi) + akun + hashtag ---------- */
+const PROV = {
+ 'Aceh':[4.7,96.75,'aceh|banda aceh|nagan raya|lhokseumawe|aceh besar|pidie|bireuen|meulaboh'],
+ 'Sumatera Utara':[2.1,99.5,'sumatera utara|sumut|deli serdang|labuhanbatu|binjai|pematangsiantar|tapanuli|nias|kota medan'],
+ 'Sumatera Barat':[-0.74,100.8,'sumatera barat|sumbar|bukittinggi|kota padang|pariaman|solok|payakumbuh'],
+ 'Riau':[0.5,101.8,'riau|pekanbaru|siak|dumai|kampar|bengkalis|rokan'],
+ 'Kepulauan Riau':[1.0,104.5,'kepulauan riau|kepri|batam|tanjungpinang|karimun|natuna|bintan'],
+ 'Jambi':[-1.6,103.6,'jambi|kerinci|muaro jambi'],
+ 'Sumatera Selatan':[-3.3,104.9,'sumatera selatan|sumsel|palembang|lubuklinggau|prabumulih|ogan'],
+ 'Bangka Belitung':[-2.7,106.4,'bangka belitung|babel|bangka|belitung|pangkalpinang'],
+ 'Bengkulu':[-3.8,102.3,'bengkulu|lebong|rejang lebong'],
+ 'Lampung':[-4.6,105.4,'lampung|bandar lampung|pringsewu|metro lampung|tanggamus|pesawaran'],
+ 'DKI Jakarta':[-6.2,106.85,'jakarta|dki|jaksel|jaktim|jakbar|jakut|jakpus'],
+ 'Jawa Barat':[-6.9,107.6,'jawa barat|jabar|bandung|kbb|bekasi|depok|bogor|cirebon|palimanan|garut|tasikmalaya|sukabumi|karawang|purwakarta|subang|indramayu|cianjur|kuningan|majalengka|sumedang|pangandaran|ciamis|banjar'],
+ 'Banten':[-6.4,106.1,'banten|serang|tangerang|cilegon|pandeglang'],
+ 'Jawa Tengah':[-7.2,110.1,'jawa tengah|jateng|semarang|demak|girikusumo|purbalingga|kudus|tegal|pekalongan|banyumas|purwokerto|cilacap|klaten|magelang|rembang|jepara|surakarta|boyolali|sragen|kebumen|wonosobo|brebes|grobogan|blora'],
+ 'DI Yogyakarta':[-7.8,110.4,'yogyakarta|jogja|jogjakarta|diy|sleman|bantul|kulon progo|gunungkidul'],
+ 'Jawa Timur':[-7.5,112.5,'jawa timur|jatim|surabaya|sidoarjo|gresik|jombang|kediri|madura|bangkalan|pamekasan|sumenep|sampang|jember|banyuwangi|probolinggo|pasuruan|tuban|lamongan|bojonegoro|mojokerto|situbondo|bondowoso|lumajang|blitar|tulungagung|ponorogo|pakisaji|kota malang|kabupaten malang|madiun|ngawi|nganjuk|trenggalek|pacitan|magetan'],
+ 'Bali':[-8.4,115.2,'bali|denpasar|badung|gianyar|buleleng|tabanan'],
+ 'Nusa Tenggara Barat':[-8.65,117.4,'nusa tenggara barat|ntb|mataram|lombok barat|lombok timur|lombok tengah|lombok utara|bima|sumbawa|dompu'],
+ 'Nusa Tenggara Timur':[-8.7,121.1,'nusa tenggara timur|ntt|kupang|flores|ende|sumba|manggarai|alor'],
+ 'Kalimantan Barat':[-0.1,111.1,'kalimantan barat|kalbar|pontianak|singkawang|landak|sambas|ketapang'],
+ 'Kalimantan Tengah':[-1.7,113.4,'kalimantan tengah|kalteng|palangka raya|palangkaraya|kotawaringin|sampit'],
+ 'Kalimantan Selatan':[-3.1,115.3,'kalimantan selatan|kalsel|banjarmasin|banjarbaru|balangan|martapura|tabalong'],
+ 'Kalimantan Timur':[0.5,116.4,'kalimantan timur|kaltim|samarinda|balikpapan|paser|kutai|bontang|berau|ikn|nusantara ikn'],
+ 'Kalimantan Utara':[3.1,116.3,'kalimantan utara|kaltara|tarakan|nunukan|bulungan'],
+ 'Sulawesi Utara':[1.2,124.8,'sulawesi utara|sulut|manado|bitung|tomohon|minahasa'],
+ 'Gorontalo':[0.7,122.4,'gorontalo'],
+ 'Sulawesi Tengah':[-1.4,121.4,'sulawesi tengah|sulteng|palu|poso|banggai|donggala'],
+ 'Sulawesi Barat':[-2.8,119.2,'sulawesi barat|sulbar|mamuju|mamasa|majene|polewali'],
+ 'Sulawesi Selatan':[-3.7,120.0,'sulawesi selatan|sulsel|sul sel|makassar|bone|gowa|enrekang|parepare|palopo|maros|bulukumba|sinjai|bantaeng|jeneponto|takalar|wajo|soppeng|luwu|toraja'],
+ 'Sulawesi Tenggara':[-4.1,122.2,'sulawesi tenggara|sultra|kendari|baubau|kolaka|konawe|buton'],
+ 'Maluku':[-3.2,130.1,'maluku|ambon|seram|tual'],
+ 'Maluku Utara':[1.6,127.8,'maluku utara|malut|ternate|tidore|halmahera'],
+ 'Papua Barat':[-1.3,133.2,'papua barat|manokwari|fakfak|kaimana|teluk bintuni'],
+ 'Papua Barat Daya':[-1.0,131.3,'papua barat daya|pbd|pabardaya|sorong|raja ampat'],
+ 'Papua':[-2.6,140.0,'jayapura|papua|keerom|sarmi|biak'],
+ 'Papua Tengah':[-3.9,136.5,'papua tengah|nabire|mimika|timika|paniai'],
+ 'Papua Pegunungan':[-4.1,138.9,'papua pegunungan|wamena|jayawijaya'],
+ 'Papua Selatan':[-7.5,139.5,'papua selatan|merauke|asmat|boven digoel'],
+};
+const GAZ=[]; for(const [p,[la,lo,al]] of Object.entries(PROV)) for(const a of al.split('|')) GAZ.push([a,p]);
+GAZ.sort((a,b)=>b[0].length-a[0].length); // frasa panjang lebih dulu
+function norm(t){ return ' '+String(t||'').toLowerCase().replace(/[_.\-#@]/g,' ').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ')+' '; }
+function findProv(t){
+  let s=norm(t); const out=new Set();
+  for(const [a,p] of GAZ){ const k=' '+a+' '; if(s.includes(k)){ out.add(p); s=s.split(k).join(' '); } }
+  return [...out];
+}
+const TAG=/#([\p{L}\p{N}_]{2,40})/gu;
+let CONTENT=[]; const GEO={tab:'lok', sel:null, selKind:null, recs:[], focus:null};
+function buildGeo(){
+  const rows=filteredRows(); const recs=[];
+  for(const r of rows){
+    if(r.t==='mention') continue; // teks baris mention = caption; caption dihitung sekali dari content.csv
+    const info=REAL.get(r.a)||{};
+    const tags=[...(r.text||'').matchAll(TAG)].map(m=>m[1].toLowerCase());
+    findProv(r.text).forEach(p=>recs.push({p,src:'teks',a:r.a,party:r.party,tags}));
+    findProv((info.handle||'')+' '+(info.nickname||'')).forEach(p=>recs.push({p,src:'akun',a:r.a,party:r.party,tags}));
+    if(tags.length && !findProv(r.text).length) recs.push({p:null,src:'teks',a:r.a,party:r.party,tags});
+  }
+  for(const c of CONTENT){
+    if(S.fPlat && c.platform!==S.fPlat) continue; if(S.fParty && c.party!==S.fParty) continue;
+    const ts=Date.parse(c.publication_date); if((S.dFrom!=null&&ts<S.dFrom)||(S.dTo!=null&&ts>S.dTo)) continue;
+    const a=(c.party+'_'+c.platform+'_official').toLowerCase();
+    const tags=[...(c.caption||'').matchAll(TAG)].map(m=>m[1].toLowerCase());
+    const ps=findProv(c.caption); ps.forEach(p=>recs.push({p,src:'caption',a,party:c.party,tags}));
+    if(!ps.length && tags.length) recs.push({p:null,src:'caption',a,party:c.party,tags});
+  }
+  GEO.recs=recs; renderGeo();
+}
+const PARTY_C={PKS:'#e0533d',PKB:'#24a06b',PPP:'#d9931a',PAN:'#2f6fd6'};
+let GEO_SHAPE=null;
+function renderGeo(){
+  const svg=d3.select('#geoMap'); svg.selectAll('*').remove();
+  const W=300,H=120, proj=d3.geoMercator().center([118,-2.5]).scale(260).translate([W/2,H/2]);
+  if(GEO_SHAPE){ proj.fitExtent([[4,4],[W-4,H-4]],GEO_SHAPE); svg.append('path').attr('class','land').attr('d',d3.geoPath(proj)(GEO_SHAPE)); }
+  const recs=GEO.recs.filter(r=>r.p && (!GEO.selKind||GEO.selKind==='prov'||matchSel(r)));
+  const by=d3.rollup(recs,v=>({n:v.length,party:d3.rollup(v,x=>x.length,d=>d.party)}),d=>d.p);
+  const max=d3.max([...by.values()],d=>d.n)||1;
+  for(const [p,v] of [...by].sort((a,b)=>b[1].n-a[1].n)){
+    const [la,lo]=PROV[p]; const [x,y]=proj([lo,la]);
+    const dom=[...v.party].sort((a,b)=>b[1]-a[1])[0]?.[0];
+    svg.append('circle').attr('class','bub'+(GEO.selKind==='prov'&&GEO.sel===p?' sel':'')).attr('cx',x).attr('cy',y).attr('r',3+9*Math.sqrt(v.n/max))
+      .attr('fill',PARTY_C[dom]||'#6b7280').on('click',()=>geoSelect('prov',p))
+      .append('title').text(`${p}: ${v.n} penyebutan · `+[...v.party].map(([k,n])=>`${k} ${n}`).join(', '));
+  }
+  if(!by.size) svg.append('text').attr('x',W/2).attr('y',H/2).attr('text-anchor','middle').attr('font-size',10).attr('fill','currentColor').text('Tidak ada penyebutan lokasi pada filter ini');
+  renderGeoList();
+}
+function matchSel(r){ return GEO.selKind==='prov'? r.p===GEO.sel : GEO.selKind==='akun'? r.a===GEO.sel : GEO.selKind==='tag'? r.tags.includes(GEO.sel) : true; }
+function renderGeoList(){
+  const recs=GEO.recs.filter(r=>!GEO.selKind || matchSel(r));
+  let items=[];
+  if(GEO.tab==='lok'){ items=[...d3.rollup(recs.filter(r=>r.p),v=>v.length,d=>d.p)].map(([k,n])=>({k,label:k,n,kind:'prov'})); }
+  else if(GEO.tab==='akun'){ items=[...d3.rollup(recs,v=>v.length,d=>d.a)].map(([k,n])=>({k,label:lab(k),n,kind:'akun'})); }
+  else { const m=new Map(); recs.forEach(r=>new Set(r.tags).forEach(t=>m.set(t,(m.get(t)||0)+1))); items=[...m].map(([k,n])=>({k,label:'#'+k,n,kind:'tag'})); }
+  items.sort((a,b)=>b.n-a.n||a.label.localeCompare(b.label)); items=items.slice(0,15);
+  const max=items[0]?.n||1;
+  const head=GEO.selKind?`<li><button type="button" id="geoClear"><span>Filter: ${esc(GEO.selKind==='akun'?lab(GEO.sel):GEO.selKind==='tag'?'#'+GEO.sel:GEO.sel)} ✕</span><span class="v">hapus</span></button></li>`:'';
+  $('geoList').innerHTML=head+(items.length?items.map(it=>`<li><button type="button" data-k="${esc(it.k)}" data-kind="${it.kind}" aria-pressed="${GEO.selKind===it.kind&&GEO.sel===it.k}"><span>${esc(it.label)}</span><span class="v">${fmtInt(it.n)}</span><span class="gbar" style="width:${(it.n/max*100).toFixed(0)}%"></span></button></li>`).join(''):'<li class="small">Tidak ada data.</li>');
+  $('geoList').querySelectorAll('button[data-k]').forEach(b=>b.onclick=()=>geoSelect(b.dataset.kind,b.dataset.k));
+  const c=$('geoClear'); if(c) c.onclick=()=>geoSelect(null,null);
+}
+function geoSelect(kind,k){
+  if(GEO.selKind===kind && GEO.sel===k){ kind=null; k=null; }
+  GEO.selKind=kind; GEO.sel=k;
+  GEO.focus = kind ? new Set(GEO.recs.filter(matchSel).map(r=>r.a)) : null; window.__geoFocus=GEO.focus;
+  renderGeo(); draw();
+}
+$('geoTabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{ GEO.tab=b.dataset.t; $('geoTabs').querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b)); renderGeoList(); });
+fetch('assets/indonesia.json').then(r=>r.ok?r.json():null).then(g=>{ GEO_SHAPE=g; if(S.summary) renderGeo(); }).catch(()=>{});
+
 $('showReal').onchange=e=>{ SHOW_REAL=e.target.checked; hidePop(); rebuild(); };
 fetch('data/names.csv',{cache:'no-store'}).then(r=>r.ok?r.text():'').catch(()=>'').then(t=>{
   if(t){ Papa.parse(t,{header:true,skipEmptyLines:true}).data.forEach(r=>{ if(!r.id) return; const id=r.id.toLowerCase(); REAL.set(id,r); if(r.handle) REAL_BY_HANDLE.set(r.handle.toLowerCase(),id); });
          if(REAL.size) $('realWrap').style.display=''; }
-  return fetch('data/default.csv',{cache:'no-store'});
+  return fetch('data/content.csv',{cache:'no-store'}).then(r=>r.ok?r.text():'').catch(()=>'').then(c=>{ if(c) CONTENT=Papa.parse(c,{header:true,skipEmptyLines:true}).data; return fetch('data/default.csv',{cache:'no-store'}); });
 }).then(r=>r.ok?r.text():Promise.reject(r.status))
   .then(t=>ingest(t,'Data penelitian (default.csv)'))
   .catch(()=>ingest(sampleCSV(),'Contoh data sintetis (akun fiktif)'));
