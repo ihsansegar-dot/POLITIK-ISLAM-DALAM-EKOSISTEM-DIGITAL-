@@ -59,7 +59,7 @@ h1{font:700 24px/1.1 var(--f-display);margin:0;letter-spacing:.2px;text-wrap:bal
 .status.warn{background:var(--warn-soft);color:var(--warn)}
 .status.err{background:var(--warn-soft);color:var(--bad)}
 .kpis{display:flex;flex-wrap:wrap;gap:8px}
-.plats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+.plats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}
 .plat{border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:var(--panel);text-align:left;cursor:pointer;display:grid;gap:3px;border-left:4px solid var(--pc)}
 .plat:hover{border-color:var(--pc)}
 .plat[aria-pressed="true"]{box-shadow:inset 0 0 0 1.5px var(--pc);background:var(--bg)}
@@ -422,7 +422,7 @@ function ingest(text, sourceName){
     const targets = targetsRaw.map(x=>x.toLowerCase());
     targetsRaw.forEach((x,i)=>{ if(!displayName.has(targets[i])) displayName.set(targets[i], x); });
     const ts = r.created_at ? Date.parse(String(r.created_at).trim()) : NaN;
-    rows.push({a, t, targets, ts: isNaN(ts)?null:ts, plat:String(r.platform||'').trim().toLowerCase(), url:String(r.content_url||'').trim(), party:String(r.party||'').trim().toUpperCase(), text:String(r.text||'')});
+    rows.push({a, t, targets, ts: isNaN(ts)?null:ts, plat:(p=>PLAT_ALIAS[p]||p)(String(r.platform||'').trim().toLowerCase()), url:String(r.content_url||'').trim(), party:String(r.party||'').trim().toUpperCase(), text:String(r.text||'')});
   }
   S.rows=rows; S.names=displayName;
   fillFilter('fPlat', rows.map(r=>r.plat)); fillFilter('fParty', rows.map(r=>r.party)); S.fPlat=''; S.fParty=''; S.source=sourceName; S.selected=null; S.focusComm=null;
@@ -557,7 +557,8 @@ function renderAll(relayout){
 }
 
 /* ---------- KPIs ---------- */
-const PLATS=[['tiktok','TikTok','#e2336b'],['instagram','Instagram','#b44fd1'],['youtube','YouTube','#d93025'],['x','X (Twitter)','#4b5563']];
+const PLATS=[['tiktok','TikTok','#e2336b'],['instagram','Instagram','#b44fd1'],['youtube','YouTube','#d93025'],['x','X (Twitter)','#4b5563'],['media','Media online','#0e7c86']];
+const PLAT_ALIAS={twitter:'x','media online':'media','media_online':'media',news:'media',berita:'media',online:'media',ig:'instagram',yt:'youtube'};
 function renderPlats(){
   const el=$('plats'); const rows=S.rows; const known=new Set(PLATS.map(p=>p[0]));
   const extra=[...new Set(rows.map(r=>r.plat).filter(p=>p&&!known.has(p)))].map(p=>[p,p,'#6b7280']);
