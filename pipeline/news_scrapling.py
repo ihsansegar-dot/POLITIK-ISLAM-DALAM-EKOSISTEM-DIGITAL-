@@ -497,6 +497,20 @@ def cmd_fetch(c, fetch=None):
 
 
 # ----------------------------------------------------------------------------- export
+def iso_date(x):
+    """'2024/08/15 10:00:00' (detik/cnn, WIB) -> '2024-08-15T10:00:00+07:00'; format ISO dibiarkan."""
+    m = re.match(r"(\d{4})/(\d\d)/(\d\d)(?:[ T](\d\d:\d\d(?::\d\d)?))?", x or "")
+    if not m: return x or ""
+    return f"{m[1]}-{m[2]}-{m[3]}" + (f"T{m[4]}+07:00" if m[4] else "")
+
+
+def outlet(netloc):
+    """nasional.kompas.com -> kompas.com ; news.republika.co.id -> republika.co.id"""
+    parts = (netloc or "").lower().split(":")[0].split(".")
+    n = 3 if len(parts) >= 3 and parts[-2] in ("co", "or", "go", "ac", "web", "my") else 2
+    return ".".join(parts[-n:])
+
+
 def cmd_export(c):
     s = load_state(); OUT.mkdir(parents=True, exist_ok=True)
     pats = {p: re.compile(rx) for p, rx in c["party_patterns"].items()}  # singkatan peka huruf besar
@@ -505,16 +519,21 @@ def cmd_export(c):
         f = s["fetched"].get(k, {})
         text = (RAW / "teks" / f"{k}.txt").read_text(encoding="utf-8") if f.get("ok") else ""
         title = f.get("title") or r.get("title") or ""
-        hay = title + "\n" + text
-        parties = sorted({p for p, rx in pats.items() if rx.search(hay)} | (set() if text else set(r["parties_query"])))
-        pub = f.get("published") or r.get("pub_hint") or (r.get("seendate") and dt.datetime.strptime(r["seendate"], "%Y%m%dT%H%M%SZ").replace(tzinfo=dt.timezone.utc).isoformat()) or ""
+        # edge = partai yang disebut di JUDUL/slug (sama untuk semua artikel, diambil teksnya atau tidak);
+        # partai yang hanya muncul di badan berita dicatat terpisah (parties_in_text), tidak jadi edge.
+        in_title = {p for p, rx in pats.items() if rx.search(title)}
+        # GDELT mencocokkan kueri pada teks terjemahan (mis. 'PAN' ikut kata lain) -> hanya judul yang dipakai
+        parties = sorted(in_title if r.get("source", "gdelt") == "gdelt" else set(r["parties_query"]) | in_title)
+        if not parties: continue
+        in_text = sorted(p for p, rx in pats.items() if text and rx.search(text))
+        pub = iso_date(f.get("published")) or r.get("pub_hint") or (r.get("seendate") and dt.datetime.strptime(r["seendate"], "%Y%m%dT%H%M%SZ").replace(tzinfo=dt.timezone.utc).isoformat()) or ""
         excerpt = (text[:300] + "…") if len(text) > 300 else text
-        rows.append({"article_id": k, "url": r["url"], "domain": r["domain"], "title": title, "published": pub,
-                     "parties": ";".join(parties), "parties_query": ";".join(r["parties_query"]),
+        rows.append({"article_id": k, "url": r["url"], "domain": r["domain"], "outlet": outlet(r["domain"]), "title": title, "published": pub,
+                     "parties": ";".join(parties), "parties_query": ";".join(r["parties_query"]), "parties_in_text": ";".join(in_text),
                      "text_fetched": bool(text), "text_chars": len(text), "fetch_error": f.get("error", ""), "month": r["month"],
                      "source": r.get("source", "gdelt")})
         for p in parties:  # edge media -> partai (mention); ko-penyebutan membentuk jembatan antarpartai
-            sna.append({"author": r["domain"], "text": title + (" — " + excerpt if excerpt else ""), "type": "mention",
+            sna.append({"author": outlet(r["domain"]), "text": title + (" — " + excerpt if excerpt else ""), "type": "mention",
                         "target_user": f"{p}_partai", "created_at": pub, "platform": "media", "party": p,
                         "interaction": "mention", "content_url": r["url"]})
     def w(name, data):
@@ -531,7 +550,7 @@ def cmd_export(c):
         with base.open("w", newline="", encoding="utf-8-sig") as fh:
             wr = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore"); wr.writeheader(); wr.writerows(old + sna)
     n_ok = sum(1 for r in rows if r["text_fetched"])
-    print(f"[export] {len(rows)} artikel ({n_ok} dengan teks), {len(sna)} edge media→partai; "
+    print(f"[export] {len(rows)} artikel ({n_ok} dengan teks), {len(sna)} edge media->partai; "
           f"{'digabung ke sna_explorer.csv' if base.exists() else 'sna_explorer.csv belum ada; pakai sna_media.csv'}")
 
 
