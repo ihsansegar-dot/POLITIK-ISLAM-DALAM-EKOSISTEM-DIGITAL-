@@ -148,6 +148,24 @@ canvas#g.hovering{cursor:pointer}
 .nlist li button:hover{text-decoration:underline}
 .muted{color:var(--muted)}
 .tables{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.senti{margin-top:14px;display:grid;gap:10px}
+.senti-head{display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap}
+.senti-head h2{font:600 12px/1 var(--f-display);text-transform:uppercase;letter-spacing:.9px;color:var(--muted);margin:0 0 6px}
+.senti-grid{display:grid;grid-template-columns:260px minmax(0,1fr) minmax(0,1.5fr);gap:12px}
+.senti-pie svg{width:100%;max-width:230px;margin:0 auto;display:block}
+.senti-pie path{cursor:pointer;stroke:var(--panel);stroke-width:2}
+.senti-pie path.dim{opacity:.3}
+.senti-leg{display:grid;gap:4px;font-size:12.5px}
+.senti-leg button{all:unset;cursor:pointer;display:flex;gap:8px;align-items:center;padding:3px 4px;border-radius:6px}
+.senti-leg button[aria-pressed=true]{background:var(--accent-soft)}
+.senti-leg i{width:10px;height:10px;border-radius:2px;display:inline-block}
+.senti-leg .num{margin-left:auto;font-family:var(--f-mono)}
+#sentTbl td.c{cursor:pointer} #sentTbl td.c:hover{background:var(--accent-soft)}
+#sentTbl td.on{background:var(--accent-soft);font-weight:600}
+.senti-ex td.tx{font-size:12px;line-height:1.35}
+.senti-ex .lbl{display:inline-block;padding:1px 6px;border-radius:9px;font-size:11px;color:#fff}
+@media (max-width:1180px){.senti-grid{grid-template-columns:240px minmax(0,1fr)}.senti-ex{grid-column:1/-1}}
+@media (max-width:760px){.senti-grid{grid-template-columns:1fr}}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:8px;align-content:start;min-width:0}
 .card .desc{font-size:12px;color:var(--muted);margin:0}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
@@ -341,6 +359,23 @@ tr.sel td{background:var(--accent-soft)}
     <div class="tables" id="tables"></div>
   </section>
 
+  <section class="senti" id="senti" aria-label="Analisis sentimen">
+    <div class="senti-head">
+      <div><h2>Sentimen</h2>
+        <p class="desc" id="sentiDesc">Positif / netral / negatif per teks, mengikuti filter platform, partai, tanggal, dan entitas.</p></div>
+      <div class="seg" id="segSent" style="grid-template-columns:repeat(3,auto)" role="group" aria-label="Model sentimen">
+        <button type="button" data-m="main" aria-pressed="true">IndoBERT</button>
+        <button type="button" data-m="alt" aria-pressed="false">RoBERTa</button>
+        <button type="button" data-m="agree" aria-pressed="false">Hanya yang sepakat</button>
+      </div>
+    </div>
+    <div class="senti-grid">
+      <div class="card senti-pie"><svg id="sentPie" viewBox="0 0 220 220" role="img" aria-label="Pie chart sentimen"></svg><div class="senti-leg" id="sentLeg"></div></div>
+      <div class="card"><h2>Per partai</h2><p class="desc">Baris = interaksi; judul yang menyebut 2 partai dihitung di keduanya.</p><table id="sentTbl"></table></div>
+      <div class="card senti-ex"><h2 id="sentExH">Contoh teks</h2><p class="desc">Klik irisan pie atau sel tabel untuk memilih. Diurutkan dari skor keyakinan model tertinggi.</p><table id="sentEx"></table></div>
+    </div>
+  </section>
+
   <section class="notes" aria-label="Catatan metode">
     <div>
       <h3>Cara data dibaca</h3>
@@ -422,7 +457,8 @@ function ingest(text, sourceName){
     const targets = targetsRaw.map(x=>x.toLowerCase());
     targetsRaw.forEach((x,i)=>{ if(!displayName.has(targets[i])) displayName.set(targets[i], x); });
     const ts = r.created_at ? Date.parse(String(r.created_at).trim()) : NaN;
-    rows.push({a, t, targets, ts: isNaN(ts)?null:ts, plat:(p=>PLAT_ALIAS[p]||p)(String(r.platform||'').trim().toLowerCase()), url:String(r.content_url||'').trim(), party:String(r.party||'').trim().toUpperCase(), text:String(r.text||'')});
+    rows.push({a, t, targets, ts: isNaN(ts)?null:ts, plat:(p=>PLAT_ALIAS[p]||p)(String(r.platform||'').trim().toLowerCase()), url:String(r.content_url||'').trim(), party:String(r.party||'').trim().toUpperCase(), text:String(r.text||''),
+      sent:String(r.sent||'').trim().toLowerCase(), sScore:+r.sent_score||0, sAlt:String(r.sent_alt||'').trim().toLowerCase(), sAltScore:+r.sent_alt_score||0, sText:String(r.sent_text||'')});
   }
   S.rows=rows; S.names=displayName;
   fillFilter('fPlat', rows.map(r=>r.plat)); fillFilter('fParty', rows.map(r=>r.party)); S.fPlat=''; S.fParty=''; S.source=sourceName; S.selected=null; S.focusComm=null;
@@ -552,7 +588,7 @@ function rebuild(){
 }
 
 function renderAll(relayout){
-  renderKpis(); renderComms(); renderTables(); renderInsight(); fillDatalist(); if(typeof buildGeo==='function') buildGeo(); if(typeof renderEnt==='function') renderEnt();
+  renderKpis(); renderComms(); renderTables(); renderInsight(); fillDatalist(); if(typeof buildGeo==='function') buildGeo(); if(typeof renderEnt==='function') renderEnt(); if(typeof renderSent==='function') renderSent();
   if(relayout) doLayout(); else draw();
 }
 
@@ -1093,6 +1129,65 @@ function findProv(t){
 }
 const TAG=/#([\p{L}\p{N}_]{2,40})/gu;
 let CONTENT=[]; const GEO={tab:'lok', sel:null, selKind:null, recs:[], focus:null};
+/* ---------- Sentimen ---------- */
+// Warna sengaja beda dari warna partai (PKS merah, PKB hijau, PPP kuning, PAN biru); label teks selalu ditampilkan.
+const SENT=[['positif','Positif','#0f8b8d'],['netral','Netral','#9aa1ab'],['negatif','Negatif','#c2410c']];
+const SENTC=Object.fromEntries(SENT.map(x=>[x[0],x[2]]));
+const SST={m:'main', sel:null, party:null};
+function sentOf(r){ if(SST.m==='alt') return r.sAlt; if(SST.m==='agree') return (r.sent&&r.sent===r.sAlt)?r.sent:''; return r.sent; }
+function renderSent(){
+  const sec=$('senti'); if(!sec) return;
+  const all=filteredRows(); const has=all.some(r=>r.sent);
+  if(!S.rows.some(r=>r.sent)){ sec.hidden=true; return; } sec.hidden=false;
+  // unit pie = teks unik per platform (judul berita yang menyebut 2 partai dihitung sekali)
+  const seen=new Set(), items=[];
+  for(const r of all){ const k=r.plat+'|'+(r.url&&r.plat==='media'?r.url:r.a+'|'+r.ts+'|'+r.text); if(seen.has(k)) continue; seen.add(k); items.push(r); }
+  const labd=items.filter(r=>sentOf(r)); const cnt={}; labd.forEach(r=>{const k=sentOf(r); cnt[k]=(cnt[k]||0)+1;});
+  const n=labd.length, nAll=items.filter(r=>r.sent).length;
+  const agree=items.filter(r=>r.sent&&r.sAlt); const ag=agree.length?agree.filter(r=>r.sent===r.sAlt).length/agree.length:0;
+  // Cohen's kappa per platform: kesepakatan dikoreksi peluang (kelas netral dominan; digabung antarplatform κ menggelembung)
+  const kappa=arr=>{ const N=arr.length; if(!N) return null; const po=arr.filter(r=>r.sent===r.sAlt).length/N, ca={}, cb={};
+    arr.forEach(r=>{ca[r.sent]=(ca[r.sent]||0)+1; cb[r.sAlt]=(cb[r.sAlt]||0)+1;}); const pe=SENT.reduce((t,[k])=>t+(ca[k]||0)*(cb[k]||0),0)/N/N; return pe<1?(po-pe)/(1-pe):0; };
+  const kLbl=k=>k<0.2?'lemah':k<0.4?'cukup':k<0.6?'sedang':k<0.8?'kuat':'sangat kuat';
+  const kapTxt=[...new Set(agree.map(r=>r.plat))].sort().map(pl=>{ const k=kappa(agree.filter(r=>r.plat===pl)); return `${pl} ${k.toFixed(2)} (${kLbl(k)})`; }).join(' · ');
+  $('sentiDesc').innerHTML=`${fmtInt(n)} teks berlabel${SST.m==='agree'?` dari ${fmtInt(nAll)} (hanya yang dilabel sama oleh kedua model)`:''} · kesepakatan IndoBERT–RoBERTa ${(ag*100).toFixed(1)}%, <b>κ Cohen ${kapTxt||'–'}</b>. `+
+    `Media: dinilai dari judul saja. Model dilatih pada ulasan/komentar (SmSA), bukan berita politik; label = nada teks, bukan sikap terhadap partai tertentu. Validasi manual sebelum dikutip.`;
+  // pie
+  const svg=d3.select('#sentPie'); svg.selectAll('*').remove();
+  const data=SENT.map(([k,l,c])=>({k,l,c,v:cnt[k]||0})).filter(d=>d.v>0);
+  const g=svg.append('g').attr('transform','translate(110,110)');
+  if(!n){ g.append('text').attr('text-anchor','middle').attr('fill',cssVar('--muted')).attr('font-size',12).text('Tidak ada teks berlabel'); }
+  const arcs=d3.pie().sort(null).value(d=>d.v)(data); const arc=d3.arc().innerRadius(48).outerRadius(100);
+  g.selectAll('path').data(arcs).join('path').attr('d',arc).attr('fill',d=>d.data.c)
+    .attr('class',d=>SST.sel&&SST.sel!==d.data.k?'dim':'')
+    .on('click',(e,d)=>{ SST.sel=SST.sel===d.data.k?null:d.data.k; renderSent(); })
+    .append('title').text(d=>`${d.data.l}: ${fmtInt(d.data.v)} (${(d.data.v/n*100).toFixed(1)}%)`);
+  g.selectAll('text.pl').data(arcs.filter(a=>a.data.v/n>=0.06)).join('text').attr('class','pl').attr('transform',d=>`translate(${arc.centroid(d)})`)
+    .attr('text-anchor','middle').attr('dy','.35em').attr('fill','#fff').attr('font-size',11).attr('font-weight',600).text(d=>Math.round(d.data.v/n*100)+'%');
+  g.append('text').attr('text-anchor','middle').attr('dy','-.1em').attr('font-size',20).attr('font-weight',600).attr('fill',cssVar('--ink')||'#111').text(fmtInt(n));
+  g.append('text').attr('text-anchor','middle').attr('dy','1.3em').attr('font-size',10.5).attr('fill',cssVar('--muted')).text('teks');
+  $('sentLeg').innerHTML=SENT.map(([k,l,c])=>`<button type="button" data-k="${k}" aria-pressed="${SST.sel===k}"><i style="background:${c}"></i>${l}<span class="num">${fmtInt(cnt[k]||0)} · ${n?((cnt[k]||0)/n*100).toFixed(1):'0'}%</span></button>`).join('');
+  $('sentLeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{ SST.sel=SST.sel===b.dataset.k?null:b.dataset.k; renderSent(); });
+  // tabel per partai (baris interaksi)
+  const parties=['PKS','PKB','PPP','PAN'].filter(p=>all.some(r=>r.party===p));
+  const rowsP=[...parties,'Total'].map(p=>{ const rs=all.filter(r=>(p==='Total'||r.party===p)&&sentOf(r)); const c={}; rs.forEach(r=>{const k=sentOf(r); c[k]=(c[k]||0)+1;}); return {p,n:rs.length,c}; });
+  const pct=(a,b)=>b?(a/b*100).toFixed(0)+'%':'–';
+  $('sentTbl').innerHTML=`<thead><tr><th>Partai</th><th class="num">n</th>${SENT.map(([k,l])=>`<th class="num">${l}</th>`).join('')}<th class="num">Net</th></tr></thead><tbody>`+
+    rowsP.map(({p,n,c})=>`<tr${p==='Total'?' style="font-weight:600"':''}><td>${p}</td><td class="num">${fmtInt(n)}</td>`+
+      SENT.map(([k])=>`<td class="num c${SST.sel===k&&SST.party===(p==='Total'?null:p)?' on':''}" data-p="${p}" data-k="${k}">${fmtInt(c[k]||0)} <span class="muted">${pct(c[k]||0,n)}</span></td>`).join('')+
+      `<td class="num" title="(positif − negatif) / n">${n?(((c.positif||0)-(c.negatif||0))/n*100).toFixed(0):'–'}</td></tr>`).join('')+'</tbody>';
+  $('sentTbl').querySelectorAll('td.c').forEach(td=>td.onclick=()=>{ const p=td.dataset.p==='Total'?null:td.dataset.p; const same=SST.sel===td.dataset.k&&SST.party===p; SST.sel=same?null:td.dataset.k; SST.party=same?null:p; renderSent(); });
+  // contoh teks
+  const sc=r=>SST.m==='alt'?r.sAltScore:r.sScore;
+  const ex=labd.filter(r=>(!SST.sel||sentOf(r)===SST.sel)&&(!SST.party||all.some(x=>x.party===SST.party&&(x===r||(x.url&&x.url===r.url&&x.plat==='media'))))).sort((a,b)=>sc(b)-sc(a)).slice(0,12);
+  $('sentExH').textContent='Contoh teks'+(SST.sel?' · '+SST.sel:'')+(SST.party?' · '+SST.party:'');
+  $('sentEx').innerHTML=`<thead><tr><th>Sentimen</th><th>Teks</th><th>Sumber</th><th class="num">Skor</th><th>Model lain</th></tr></thead><tbody>`+
+    ex.map(r=>{ const k=sentOf(r), o=SST.m==='alt'?r.sent:r.sAlt; const t=r.sText||r.text;
+      return `<tr><td><span class="lbl" style="background:${SENTC[k]}">${k}</span></td><td class="tx">${esc(t.length>220?t.slice(0,220)+'…':t)}</td>`+
+        `<td>${esc(r.plat)} · ${esc(lab(r.a))}</td><td class="num">${(sc(r)*100).toFixed(0)}%</td><td>${o?`<span class="lbl" style="background:${SENTC[o]||'#888'}">${o}</span>`:'–'}</td></tr>`; }).join('')+
+    (ex.length?'':'<tr><td colspan="5" class="muted">Tidak ada teks.</td></tr>')+'</tbody>';
+}
+$('segSent').querySelectorAll('button').forEach(b=>b.onclick=()=>{ SST.m=b.dataset.m; $('segSent').querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b)); renderSent(); });
 // Media online: buang dateline ("JAKARTA, KOMPAS.com -", "Liputan6.com, Jakarta -", "Jakarta -") agar lokasi
 // redaksi tidak terhitung sebagai lokasi yang diberitakan.
 function stripDL(t){ const i=(t||'').indexOf(' — '); if(i<0) return t||''; let e=t.slice(i+3);
