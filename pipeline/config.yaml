@@ -74,3 +74,13 @@ api:
 # Semua akun lain otomatis dipseudonimkan (HMAC-SHA256 + ANON_SALT).
 public_figures: []
 #  - {platform: instagram, handle: almuzzammil.yusuf, role: "Presiden PKS 2025-2030 (bio terverifikasi IG)"}
+
+# Media online (news_scrapling.py): penemuan via GDELT DOC 2.0, teks via Scrapling Fetcher (HTTP biasa).
+media:
+  since: "2024-01-01"
+  until: null                 # null = hari ini
+  fetch_per_party_month: 15   # teks artikel: sampel acak berbenih per partai per bulan (judul tetap dicatat semua)
+  seed: 2029
+  gdelt_delay_s: 6
+  domain_delay_s: 3
+  deny_domains: []            # isi domain yang tidak boleh diambil teksnya
