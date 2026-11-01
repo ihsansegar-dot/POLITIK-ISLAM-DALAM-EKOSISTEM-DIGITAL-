@@ -157,6 +157,9 @@ canvas#g.hovering{cursor:pointer}
 .ai-out ol{margin:0;padding-left:22px;display:grid;gap:8px}
 .ai-out .conf{font-size:12px;color:var(--muted)}
 .ai-out .err{color:#b42318}
+.netseg button{display:flex;flex-direction:column;align-items:center;gap:1px;line-height:1.1}
+.netseg button small{font:500 10.5px var(--f-mono);opacity:.75}
+.netseg button:disabled{opacity:.45;cursor:not-allowed}
 .sentbox .seg button{font-size:12px;padding-left:2px;padding-right:2px}
 #segFSent button[data-k=positif][aria-pressed=true]{background:#0f8b8d;border-color:#0f8b8d;color:#fff}
 #segFSent button[data-k=netral][aria-pressed=true]{background:#9aa1ab;border-color:#9aa1ab;color:#fff}
@@ -247,11 +250,14 @@ tr.sel td{background:var(--accent-soft)}
       <h2>Pengaturan</h2>
       <div class="grp">
         <span class="lbl">Jaringan</span>
-        <div class="seg" id="segNet" style="grid-template-columns:1fr 1fr 1fr">
-          <button type="button" data-net="retweet" aria-pressed="true">Retweet</button>
-          <button type="button" data-net="reply" aria-pressed="false">Reply</button>
-          <button type="button" data-net="mention" aria-pressed="false">Mention</button>
+        <div class="seg netseg" id="segNet" style="grid-template-columns:repeat(3,1fr)">
+          <button type="button" data-net="repost" aria-pressed="true" title="Retweet / repost / share">Repost<small></small></button>
+          <button type="button" data-net="komentar" aria-pressed="false" title="Komentar pada unggahan (author → pemilik unggahan)">Komentar<small></small></button>
+          <button type="button" data-net="reply" aria-pressed="false" title="Balasan pada komentar (author → pemilik komentar)">Reply<small></small></button>
+          <button type="button" data-net="like" aria-pressed="false" title="Suka (author → pemilik konten)">Like<small></small></button>
+          <button type="button" data-net="mention" aria-pressed="false" title="Menyebut akun (@ / nama partai di judul berita)">Mention<small></small></button>
         </div>
+        <span class="small" id="netNote"></span>
       </div>
       <div class="grp">
         <span class="lbl">Layout</span>
@@ -344,19 +350,19 @@ tr.sel td{background:var(--accent-soft)}
         <span class="small" id="sentNote">Filter sentimen berlaku untuk graf, tabel, peta, dan entitas. Label di bawah ambang keyakinan dianggap tak berlabel. Mode Sepakat memakai skor terendah dari kedua model.</span>
       </div>
       <label class="chk" id="realWrap" style="display:none"><input type="checkbox" id="showReal" checked> Tampilkan nama akun asli (matikan untuk tangkapan layar publikasi)</label>
-      <label class="chk"><input type="checkbox" id="selfLoop" checked> Abaikan self-loop (aktor me-retweet/membalas dirinya)</label>
+      <label class="chk"><input type="checkbox" id="selfLoop" checked> Abaikan self-loop (aktor me-repost/mengomentari/membalas dirinya)</label>
       <div class="grp">
         <span class="lbl">Ekspor</span>
         <button class="btn primary" id="btnGexf" type="button">Ekspor GEXF (.zip)</button>
         <button class="btn" id="btnCsv" type="button">Ekspor metrik (.csv)</button>
         <button class="btn" id="btnCopy" type="button">Salin GEXF jaringan aktif</button>
-        <span class="small">ZIP berisi <code style="font-family:var(--f-mono)">retweet.gexf</code> dan <code style="font-family:var(--f-mono)">reply.gexf</code>, siap dibuka di Gephi.</span>
+        <span class="small">ZIP berisi satu berkas <code style="font-family:var(--f-mono)">.gexf</code> per jaringan yang berisi data (repost, komentar, reply, like, mention), siap dibuka di Gephi.</span>
       </div>
     </aside>
 
     <div class="panel graph-panel">
       <div class="graph-head">
-        <div class="t" id="gTitle">Graf retweet<small id="gSub"></small></div>
+        <div class="t" id="gTitle">Graf repost<small id="gSub"></small></div>
         <div style="display:flex;gap:6px;align-items:center">
           <button class="btn" id="btnRelayout" type="button">Atur ulang layout</button>
           <span class="pill" id="dataPill">belum ada data</span>
@@ -419,7 +425,7 @@ tr.sel td{background:var(--accent-soft)}
     <div>
       <h3>Cara data dibaca</h3>
       <ul>
-        <li>Baris <code>type</code> = <code>retweet</code> (juga <code>rt</code>) masuk jaringan retweet; <code>reply</code> masuk jaringan reply. Baris <code>tweet</code> hanya dihitung di ringkasan.</li>
+        <li><code>type</code> = <code>retweet</code>/<code>rt</code>/<code>repost</code>/<code>share</code> → jaringan <b>Repost</b>; <code>comment</code>/<code>komentar</code> → <b>Komentar</b>; <code>reply</code>/<code>balasan</code> → <b>Reply</b>, kecuali kolom <code>interaction</code> = <code>comment</code> (komentar pada unggahan) → <b>Komentar</b>; <code>like</code>/<code>suka</code>/<code>favorite</code> → <b>Like</b>; <code>mention</code> → <b>Mention</b>. Baris <code>tweet</code>/<code>post</code> hanya dihitung di ringkasan.</li>
         <li>Nama akun dinormalisasi: <code>@</code> dibuang, huruf kecil. <code>target_user</code> berisi beberapa akun (dipisah koma/spasi) dibuat menjadi beberapa edge.</li>
         <li>Retweet/reply tanpa <code>target_user</code> dilewati dan dilaporkan di status.</li>
       </ul>
@@ -464,20 +470,26 @@ const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
 
 const S = {
-  rows:[], source:'', net:'retweet', maxNodes:200, labelN:25, edgeOp:.4, minW:1, degMode:'unique',
+  rows:[], source:'', net:'komentar', maxNodes:200, labelN:25, edgeOp:.4, minW:1, degMode:'unique',
   res:1, norm:'none', alg:'vos', dropSelf:true, dFrom:null, dTo:null, selected:null, hover:null, focusComm:null,
-  nets:{retweet:null, reply:null}, summary:null, layout:null, transform:d3.zoomIdentity, dl:null
+  nets:{}, summary:null, layout:null, transform:d3.zoomIdentity, dl:null
 };
 
 /* ---------- status ---------- */
 function status(msg, kind){ const el=$('status'); el.className='status'+(kind?' '+kind:''); el.innerHTML=msg; }
 
 /* ---------- parsing ---------- */
-const NETS = ['retweet','reply','mention'];
+const NETS = ['repost','komentar','reply','like','mention'];
+const NET_LBL = {repost:'Repost', komentar:'Komentar', reply:'Reply', like:'Like', mention:'Mention'};
 const REAL = new Map(), REAL_BY_HANDLE = new Map(); let SHOW_REAL = true;
 function lab(id){ const r=REAL.get(id); if(SHOW_REAL && r && r.handle) return '@'+r.handle; return (S.names&&S.names.get(id))||id; }
-const VERB = {retweet:['me-retweet','di-retweet'], reply:['membalas/mengomentari','dibalas/dikomentari'], mention:['menyebut (mention)','disebut']};
-const TYPE_MAP = {mention:'mention', comment:'reply', retweet:'retweet', rt:'retweet', retweeted:'retweet', repost:'retweet', reply:'reply', replied:'reply', balasan:'reply', tweet:'tweet', original:'tweet', post:'tweet', quote:'quote'};
+const VERB = {repost:['me-repost','di-repost'], komentar:['mengomentari','dikomentari'], reply:['membalas komentar','dibalas'], like:['menyukai','disukai'], mention:['menyebut (mention)','disebut']};
+const TYPE_MAP = {mention:'mention', tag:'mention',
+  retweet:'repost', rt:'repost', retweeted:'repost', repost:'repost', reposted:'repost', share:'repost', shared:'repost', stitch:'repost', duet:'repost',
+  comment:'komentar', commented:'komentar', komentar:'komentar',
+  reply:'reply', replied:'reply', balasan:'reply',
+  like:'like', liked:'like', likes:'like', favorite:'like', favourite:'like', fav:'like', suka:'like', love:'like', heart:'like', digg:'like',
+  tweet:'tweet', original:'tweet', post:'tweet', quote:'quote'};
 function normUser(u){ return String(u||'').trim().replace(/^@+/,'').toLowerCase(); }
 
 function ingest(text, sourceName){
@@ -491,7 +503,9 @@ function ingest(text, sourceName){
   for(const r of res.data){
     const aRaw=String(r.author||'').trim(); const a=normUser(aRaw); if(!a) continue;
     if(!displayName.has(a)) displayName.set(a, aRaw.replace(/^@+/,''));
-    const t = TYPE_MAP[String(r.type||'').trim().toLowerCase()] || 'other';
+    let t = TYPE_MAP[String(r.type||'').trim().toLowerCase()] || 'other';
+    const itx = String(r.interaction||'').trim().toLowerCase();
+    if(t==='reply' && (itx==='comment'||itx==='komentar')) t='komentar';  // komentar pada unggahan, bukan balasan komentar
     const targetsRaw = String(r.target_user||'').split(/[,;\s]+/).map(s=>s.trim().replace(/^@+/,'')).filter(Boolean);
     const targets = targetsRaw.map(x=>x.toLowerCase());
     targetsRaw.forEach((x,i)=>{ if(!displayName.has(targets[i])) displayName.set(targets[i], x); });
@@ -600,24 +614,25 @@ function rebuild(){
   setTimeout(()=>{
     const t0=performance.now();
     const rows=filteredRows();
-    const cnt={tweet:0,retweet:0,reply:0,quote:0,other:0}; const authors=new Set();
+    const cnt={tweet:0,repost:0,komentar:0,reply:0,like:0,quote:0,other:0}; const authors=new Set();
     let undated=0;
     for(const r of S.rows){ if(r.ts==null) undated++; }
     for(const r of rows){ cnt[r.t]=(cnt[r.t]||0)+1; authors.add(r.a); }
     for(const type of NETS){ const net=buildNet(type,rows); computeMetrics(net); S.nets[type]=net; }
     S.summary={rows:rows.length,total:S.rows.length,cnt,authors:authors.size,undated};
+    renderNetSeg();
     if(S.nets[S.net].g.order===0){ const alt=NETS.find(t=>S.nets[t].g.order>0); if(alt){ S.net=alt; $('segNet').querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x.dataset.net===alt)); } }
     const dt=Math.round(performance.now()-t0);
-    const sk=S.nets.retweet.skipped+S.nets.reply.skipped;
+    const sk=NETS.filter(t=>t!=='mention').reduce((x,t)=>x+S.nets[t].skipped,0);
     const dateNote = (S.dFrom!=null && undated) ? ` ${fmtInt(undated)} baris tanpa created_at valid dikeluarkan oleh filter tanggal.` : '';
     const msg=`<b>${esc(S.source)}</b>: ${fmtInt(rows.length)} dari ${fmtInt(S.rows.length)} baris dipakai, dihitung dalam ${fmtInt(dt)} ms.`+
-      (sk?` ${fmtInt(sk)} retweet/reply tanpa target_user dilewati.`:'')+dateNote+(S.parseNote||'')+
-      (S.nets.retweet.betwSkipped||S.nets.reply.betwSkipped?' Betweenness dilewati karena graf terlalu besar; <button class="btn" id="forceB" type="button">hitung tetap</button>':'');
+      (sk?` ${fmtInt(sk)} interaksi tanpa target_user dilewati.`:'')+dateNote+(S.parseNote||'')+
+      (NETS.some(t=>S.nets[t].betwSkipped)?' Betweenness dilewati karena graf terlalu besar; <button class="btn" id="forceB" type="button">hitung tetap</button>':'');
     status(msg, (sk||S.parseNote||dateNote)?'warn':'');
     const fb=$('forceB'); if(fb) fb.onclick=()=>{ for(const t of NETS){ const n=S.nets[t]; n.forceBetw=true; status('Menghitung betweenness…'); } setTimeout(()=>{ for(const t of NETS){ const n=S.nets[t]; const b=L.metrics.centrality.betweenness(n.g,{getEdgeWeight:null,normalized:true}); for(const k in b) n.M[k].betw=b[k]||0; n.betwSkipped=false; } status('Betweenness selesai dihitung.'); renderAll(false); },30); };
     $('dataPill').textContent = S.source.startsWith('Contoh') ? 'contoh sintetis' : (S.source.startsWith('Data penelitian') ? 'data nyata · TikTok (sampel 1 Nov 2026) + media online (arsip Jan 2024–Nov 2026)' : 'data unggahan');
     $('dataPill').className = 'pill' + (S.source.startsWith('Contoh') ? '' : ' live');
-    const maxN=Math.max(S.nets.retweet.g.order,S.nets.reply.g.order,20);
+    const maxN=Math.max(...NETS.map(t=>S.nets[t].g.order),20);
     const mx=$('maxNodes'); mx.max=Math.max(20,Math.ceil(maxN/10)*10);
     if(+mx.value>+mx.max){ mx.value=mx.max; }
     S.maxNodes=+mx.value; $('oMax').textContent=S.maxNodes;
@@ -627,6 +642,14 @@ function rebuild(){
   },20);
 }
 
+function renderNetSeg(){
+  const empty=[];
+  $('segNet').querySelectorAll('button').forEach(b=>{ const n=S.nets[b.dataset.net]; const k=n?n.interactions:0;
+    b.querySelector('small').textContent=fmtInt(k); b.disabled=!k; if(!k) empty.push(NET_LBL[b.dataset.net]); });
+  const likeEmpty=!(S.nets.like&&S.nets.like.interactions);
+  $('netNote').innerHTML = (empty.length?`Tanpa data pada filter ini: ${empty.join(', ')}. `:'')+
+    (likeEmpty?'<b>Like</b>: platform umumnya tidak membuka siapa yang menyukai (X menyembunyikannya sejak 2024; TikTok/IG/YouTube hanya memberi jumlah), jadi jaringan like hanya terisi bila CSV memuat baris <code>type=like</code> dengan <code>target_user</code>.':'');
+}
 function renderAll(relayout){
   renderKpis(); renderComms(); renderTables(); renderInsight(); fillDatalist(); if(typeof buildGeo==='function') buildGeo(); if(typeof renderEnt==='function') renderEnt(); if(typeof renderSent==='function') renderSent();
   if(relayout) doLayout(); else draw();
@@ -655,7 +678,7 @@ function renderKpis(){
   const dens = g.order>1 ? g.size/(g.order*(g.order-1)) : 0;
   const items=[
     [fmtInt(s.rows),'baris dianalisis'],[fmtInt(s.authors),'author unik'],
-    [fmtInt(s.cnt.tweet||0),'tweet'],[fmtInt(s.cnt.retweet||0),'retweet'],[fmtInt(s.cnt.reply||0),'reply'],
+    [fmtInt(s.cnt.tweet||0),'post'],[fmtInt(s.cnt.repost||0),'repost'],[fmtInt(s.cnt.komentar||0),'komentar'],[fmtInt(s.cnt.reply||0),'reply'],[fmtInt(s.cnt.like||0),'like'],
     [fmtInt(g.order),`node ${S.net}`],[fmtInt(g.size),`edge ${S.net}`],[fmtInt(net.interactions),'interaksi (bobot)'],
     [fmtDec(dens,4),'densitas'],[fmtInt(net.commCount||0),'komunitas'],[isNaN(net.Q)?'–':fmtDec(net.Q,3),'modularitas Q']
   ];
@@ -1095,7 +1118,7 @@ async function saveFile(filename, data){
 const stamp=()=>new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');
 $('btnGexf').onclick=async()=>{
   if(!S.summary){ status('Muat data terlebih dahulu.','warn'); return; }
-  const zip=new JSZip(); zip.file('retweet.gexf',toGexf('retweet')); zip.file('reply.gexf',toGexf('reply')); zip.file('mention.gexf',toGexf('mention'));
+  const zip=new JSZip(); NETS.filter(t=>S.nets[t]&&S.nets[t].g.order).forEach(t=>zip.file(t+'.gexf',toGexf(t)));
   zip.file('metrik_aktor.csv',metricsCSV());
   zip.file('BACA.txt',`SNA Explorer, diekspor ${new Date().toLocaleString('id-ID')}\nSumber: ${S.source}\nRentang: ${$('dFrom').value||'-'} s.d. ${$('dTo').value||'-'}\nResolusi Louvain: ${S.res}, seed 42\nNormalisasi (layout + Louvain): ${S.norm==='none'?'none (bobot mentah)':'association strength'}. Atribut weight pada edge GEXF tetap jumlah interaksi mentah.\nBetweenness: tidak berbobot, dinormalisasi. PageRank: berbobot, alpha 0.85.\nLayout: ${S.alg==='vos'?'VOS mapping':'ForceAtlas2'}. Posisi node mengikuti layout di aplikasi untuk node yang tampil; node lain diberi posisi acak. Jalankan ForceAtlas2 di Gephi untuk layout penuh.\n`);
   const blob=await zip.generateAsync({type:'blob'});
