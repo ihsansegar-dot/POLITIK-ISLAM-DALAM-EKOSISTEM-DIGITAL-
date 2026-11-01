@@ -84,3 +84,14 @@ media:
   gdelt_delay_s: 6
   domain_delay_s: 3
   deny_domains: []            # isi domain yang tidak boleh diambil teksnya
+
+# Apify (apify_collect.py) - keputusan peneliti 2 Nov 2026: X hanya akun partai; batas biaya keras $30.
+apify:
+  max_usd: 30
+  posts_per_month: 5          # target sampel IG/YouTube per akun per bulan (urutan komentar diacak bila anggaran habis)
+  comments_per_post: 20
+  min_comments: 1
+  seed: 2029
+  ig_feed_limit: 1000         # post IG terbaru per akun yang ditelusuri (Jan 2024 - sekarang)
+  yt_feed_limit: 400
+  x_max_tweets_per_account: 600

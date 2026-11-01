@@ -10,3 +10,7 @@ __pycache__/
 
 # Data nyata di aplikasi (berisi teks komentar): jangan di repo publik
 sna-explorer/data/
+
+# kunci & token API (jangan pernah di-commit)
+*_KEY.txt
+*_TOKEN.txt
