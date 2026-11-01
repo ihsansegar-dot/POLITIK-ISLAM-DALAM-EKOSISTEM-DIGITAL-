@@ -1,0 +1,9 @@
+# Data penelitian (memuat username asli di raw/) dan rahasia: JANGAN di-commit
+pipeline/data/
+data/
+ANON_SALT_RAHASIA.txt
+*.salt
+.env
+__pycache__/
+.pytest_cache/
+*.zip

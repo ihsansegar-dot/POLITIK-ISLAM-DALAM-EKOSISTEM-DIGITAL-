@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SNA Explorer Retweet dan Reply</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: header + data bar, then a three-column explorer (pengaturan | graf | insight), then top-10 tables and method notes. */
+:root{
+  --bg:#f2f4f8; --panel:#ffffff; --ink:#16233b; --muted:#5b687e; --line:#dbe1ea; --accent:#1d4f9c;
+  --accent-soft:#e6eefb; --warn:#a15c00; --warn-soft:#fff4e0; --bad:#b4232c; --ok:#21794a;
+  --canvas:#fbfcfe; --halo:rgba(251,252,254,.92);
+  --f-display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1420; --panel:#151d2c; --ink:#e3e9f3; --muted:#93a0b6; --line:#28344a; --accent:#7fa8ec;
+    --accent-soft:#1c2a44; --warn:#f0b45a; --warn-soft:#2e2414; --bad:#f07a80; --ok:#6fd09a;
+    --canvas:#111827; --halo:rgba(17,24,39,.9); color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1420; --panel:#151d2c; --ink:#e3e9f3; --muted:#93a0b6; --line:#28344a; --accent:#7fa8ec;
+  --accent-soft:#1c2a44; --warn:#f0b45a; --warn-soft:#2e2414; --bad:#f07a80; --ok:#6fd09a;
+  --canvas:#111827; --halo:rgba(17,24,39,.9); color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--f-body)}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1500px;margin:0 auto;padding:16px;display:grid;gap:14px}
+header.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;background:var(--panel);border:1px solid var(--line);border-top:4px solid var(--accent);border-radius:10px;padding:14px 18px}
+h1{font:700 24px/1.1 var(--f-display);margin:0;letter-spacing:.2px;text-wrap:balance}
+.sub{color:var(--muted);font-size:13px;margin-top:4px}
+.privacy{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:4px 10px;background:var(--bg)}
+.bar{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:grid;gap:10px}
+.bar-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.drop{flex:1 1 320px;border:1.5px dashed var(--line);border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;transition:border-color .15s,background .15s}
+.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop code{font-family:var(--f-mono);font-size:12px;background:var(--bg);padding:1px 5px;border-radius:4px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:7px;padding:6px 12px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--panel);font-weight:600}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.file-label{display:inline-flex}
+.file-label input{position:absolute;width:1px;height:1px;opacity:0}
+.status{font-size:13px;padding:7px 10px;border-radius:7px;background:var(--accent-soft)}
+.status.warn{background:var(--warn-soft);color:var(--warn)}
+.status.err{background:var(--warn-soft);color:var(--bad)}
+.kpis{display:flex;flex-wrap:wrap;gap:8px}
+.kpi{border:1px solid var(--line);border-radius:8px;padding:6px 10px;min-width:96px;background:var(--bg)}
+.kpi b{display:block;font:600 18px/1.2 var(--f-display);font-variant-numeric:tabular-nums}
+.kpi span{font-size:11.5px;color:var(--muted)}
+.explorer{display:grid;grid-template-columns:230px minmax(0,1fr) 290px;gap:12px;min-height:640px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.panel h2,.card h2{font:600 12px/1 var(--f-display);text-transform:uppercase;letter-spacing:.9px;color:var(--muted);margin:0}
+.grp{display:grid;gap:6px}
+.grp>label,.grp>.lbl{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;display:flex;justify-content:space-between}
+.grp output{font-family:var(--f-mono);font-weight:500;color:var(--ink);text-transform:none;letter-spacing:0}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.seg button{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:5px 6px;cursor:pointer;font-size:13px}
+.seg button[aria-pressed="true"]{border-color:var(--ink);font-weight:600;box-shadow:inset 0 0 0 1px var(--ink)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+input[type=date],select,input[type=search]{width:100%;border:1px solid var(--line);border-radius:6px;padding:5px 7px;background:var(--panel)}
+.chk{display:flex;gap:7px;align-items:flex-start;font-size:13px}
+.chk input{margin-top:3px;accent-color:var(--accent)}
+.graph-panel{padding:0;overflow:hidden;gap:0}
+.graph-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)}
+.graph-head .t{font:600 14px var(--f-display)}
+.graph-head .t small{font:400 13px var(--f-body);color:var(--muted);margin-left:6px}
+.pill{font-size:11.5px;border:1px solid var(--line);border-radius:999px;padding:2px 9px;color:var(--muted);white-space:nowrap}
+.pill.live{color:var(--ok);border-color:currentColor}
+.canvas-wrap{position:relative;flex:1;min-height:520px;background:var(--canvas)}
+canvas#g{position:absolute;inset:0;width:100%;height:100%;cursor:grab;display:block}
+canvas#g.hovering{cursor:pointer}
+.gcount{position:absolute;left:10px;top:8px;font-size:12px;color:var(--muted);font-family:var(--f-mono);pointer-events:none}
+.zoom{position:absolute;right:10px;top:8px;display:flex;flex-direction:column;gap:4px}
+.zoom button{width:30px;height:30px;border:1px solid var(--line);border-radius:6px;background:var(--panel);cursor:pointer;font-size:16px;line-height:1}
+.tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:7px 9px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.12);display:none;max-width:240px}
+.tip b{font-family:var(--f-mono);font-weight:500}
+.busy{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:var(--halo);font-weight:600;color:var(--muted)}
+.busy.on{display:flex}
+.legend-note{font-size:12px;color:var(--muted);padding:8px 12px;border-top:1px solid var(--line)}
+.comm-list{display:grid;gap:4px;max-height:250px;overflow:auto}
+.comm{display:grid;grid-template-columns:12px 1fr auto;gap:8px;align-items:center;padding:4px 6px;border-radius:6px;cursor:pointer;border:1px solid transparent;background:none;text-align:left;width:100%}
+.comm:hover{background:var(--bg)}
+.comm[aria-pressed="true"]{border-color:var(--ink)}
+.dot{width:12px;height:12px;border-radius:50%;display:inline-block;flex:none}
+.comm .nm{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.comm .nm small{color:var(--muted);font-family:var(--f-mono)}
+.comm .ct{font-family:var(--f-mono);font-size:12px;font-variant-numeric:tabular-nums}
+.bar-mini{height:4px;border-radius:2px;background:var(--line);overflow:hidden;grid-column:2/4}
+.bar-mini i{display:block;height:100%}
+.insight{border-top:1px solid var(--line);padding-top:10px;display:grid;gap:8px;font-size:13px}
+.insight .who{font:500 15px var(--f-mono);word-break:break-all;display:flex;align-items:center;gap:7px}
+.mgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.mgrid div{background:var(--bg);border-radius:6px;padding:5px 7px}
+.mgrid span{display:block;font-size:11px;color:var(--muted)}
+.mgrid b{font-family:var(--f-mono);font-weight:500;font-variant-numeric:tabular-nums}
+.nlist{margin:0;padding:0;list-style:none;display:grid;gap:2px}
+.nlist li{display:flex;justify-content:space-between;gap:8px;font-family:var(--f-mono);font-size:12px}
+.nlist li button{all:unset;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nlist li button:hover{text-decoration:underline}
+.muted{color:var(--muted)}
+.tables{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:8px;align-content:start;min-width:0}
+.card .desc{font-size:12px;color:var(--muted);margin:0}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--line);padding:4px 4px}
+td{padding:4px 4px;border-bottom:1px solid var(--line);vertical-align:middle}
+td.num,th.num{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+td.rk{color:var(--muted);font-family:var(--f-mono);width:22px}
+td.actor{max-width:0;width:100%}
+td.actor button{all:unset;cursor:pointer;display:flex;align-items:center;gap:6px;font-family:var(--f-mono);overflow:hidden;white-space:nowrap;max-width:100%}
+td.actor button span.n{overflow:hidden;text-overflow:ellipsis}
+td.actor button:hover span.n{text-decoration:underline}
+tr.sel td{background:var(--accent-soft)}
+.notes{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;font-size:13px}
+.notes h3{font:600 14px var(--f-display);margin:0 0 6px}
+.notes p,.notes ul{margin:0 0 6px;max-width:65ch}
+.notes ul{padding-left:18px}
+.notes code{font-family:var(--f-mono);font-size:12px}
+.small{font-size:12px;color:var(--muted)}
+@media (max-width:1180px){.explorer{grid-template-columns:220px minmax(0,1fr)}.explorer>.right{grid-column:1/-1}.tables{grid-template-columns:repeat(2,minmax(0,1fr))}.notes{grid-template-columns:1fr}}
+@media (max-width:760px){.explorer{grid-template-columns:1fr}.tables{grid-template-columns:1fr}.canvas-wrap{min-height:420px}}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>SNA Explorer · Jaringan Retweet &amp; Reply</h1>
+      <div class="sub">Jaringan berarah <span style="font-family:var(--f-mono)">author → target_user</span>, bobot edge = jumlah interaksi. Degree, betweenness, PageRank, komunitas Louvain.</div>
+    </div>
+    <div class="privacy">Data diproses di browser Anda dan tidak dikirim ke server mana pun.</div>
+  </header>
+
+  <section class="bar" aria-label="Data masukan">
+    <div class="bar-row">
+      <div class="drop" id="drop">
+        <label class="file-label btn primary" for="file">Unggah CSV<input type="file" id="file" accept=".csv,text/csv"></label>
+        <span class="small">atau seret berkas ke sini. Kolom wajib: <code>author</code> <code>text</code> <code>type</code> <code>target_user</code> <code>created_at</code></span>
+      </div>
+      <button class="btn" id="btnSample" type="button">Muat contoh data sintetis</button>
+      <button class="btn" id="btnTemplate" type="button">Unduh contoh CSV</button>
+    </div>
+    <div class="status" id="status" role="status">Memuat pustaka…</div>
+    <div class="kpis" id="kpis"></div>
+  </section>
+
+  <section class="explorer">
+    <aside class="panel" aria-label="Pengaturan">
+      <h2>Pengaturan</h2>
+      <div class="grp">
+        <span class="lbl">Jaringan</span>
+        <div class="seg" id="segNet" style="grid-template-columns:1fr 1fr 1fr">
+          <button type="button" data-net="retweet" aria-pressed="true">Retweet</button>
+          <button type="button" data-net="reply" aria-pressed="false">Reply</button>
+          <button type="button" data-net="mention" aria-pressed="false">Mention</button>
+        </div>
+      </div>
+      <div class="grp">
+        <span class="lbl">Layout</span>
+        <div class="seg" id="segAlg">
+          <button type="button" data-alg="vos" aria-pressed="true">VOS mapping</button>
+          <button type="button" data-alg="fa2" aria-pressed="false">ForceAtlas2</button>
+        </div>
+      </div>
+      <div class="grp">
+        <span class="lbl">Normalisasi</span>
+        <div class="seg" id="segNorm">
+          <button type="button" data-norm="association" aria-pressed="false">Association</button>
+          <button type="button" data-norm="none" aria-pressed="true">None</button>
+        </div>
+        <span class="small">Seperti VOSviewer: memengaruhi layout dan komunitas Louvain. Degree, betweenness, dan PageRank tetap memakai bobot mentah. Efek pada posisi node paling terlihat dengan layout VOS mapping.</span>
+      </div>
+      <div class="grp">
+        <label for="maxNodes">Maks. node tampil <output id="oMax">200</output></label>
+        <input type="range" id="maxNodes" min="20" max="1000" step="10" value="200">
+        <span class="small">Dipilih berdasarkan PageRank tertinggi. Metrik tetap dihitung pada graf penuh.</span>
+      </div>
+      <div class="grp">
+        <label for="labelN">Label node <output id="oLab">25</output></label>
+        <input type="range" id="labelN" min="0" max="100" step="5" value="25">
+      </div>
+      <div class="grp">
+        <label for="edgeOp">Opasitas edge <output id="oEdge">40%</output></label>
+        <input type="range" id="edgeOp" min="5" max="100" step="5" value="40">
+      </div>
+      <div class="grp">
+        <label for="minW">Bobot edge minimum <output id="oMinW">1</output></label>
+        <input type="range" id="minW" min="1" max="10" step="1" value="1">
+        <span class="small">Hanya menyaring tampilan, bukan perhitungan.</span>
+      </div>
+      <div class="grp">
+        <label for="degMode">Hitungan degree</label>
+        <select id="degMode">
+          <option value="unique">Jumlah aktor unik</option>
+          <option value="weighted">Jumlah interaksi (berbobot)</option>
+        </select>
+      </div>
+      <div class="grp">
+        <label for="res">Resolusi Louvain <output id="oRes">1.0</output></label>
+        <input type="range" id="res" min="0.2" max="3" step="0.1" value="1">
+        <span class="small">&gt;1 menghasilkan komunitas lebih kecil dan lebih banyak.</span>
+      </div>
+      <div class="grp">
+        <span class="lbl">Rentang created_at</span>
+        <input type="date" id="dFrom" aria-label="Tanggal mulai">
+        <input type="date" id="dTo" aria-label="Tanggal akhir">
+      </div>
+      <div class="grp" style="display:none">
+        <label for="fPlat">Platform</label>
+        <select id="fPlat"></select>
+      </div>
+      <div class="grp" style="display:none">
+        <label for="fParty">Partai (pemilik akun seed)</label>
+        <select id="fParty"></select>
+      </div>
+      <label class="chk"><input type="checkbox" id="selfLoop" checked> Abaikan self-loop (aktor me-retweet/membalas dirinya)</label>
+      <div class="grp">
+        <span class="lbl">Ekspor</span>
+        <button class="btn primary" id="btnGexf" type="button">Ekspor GEXF (.zip)</button>
+        <button class="btn" id="btnCsv" type="button">Ekspor metrik (.csv)</button>
+        <button class="btn" id="btnCopy" type="button">Salin GEXF jaringan aktif</button>
+        <span class="small">ZIP berisi <code style="font-family:var(--f-mono)">retweet.gexf</code> dan <code style="font-family:var(--f-mono)">reply.gexf</code>, siap dibuka di Gephi.</span>
+      </div>
+    </aside>
+
+    <div class="panel graph-panel">
+      <div class="graph-head">
+        <div class="t" id="gTitle">Graf retweet<small id="gSub"></small></div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="btn" id="btnRelayout" type="button">Atur ulang layout</button>
+          <span class="pill" id="dataPill">belum ada data</span>
+        </div>
+      </div>
+      <div class="canvas-wrap" id="cwrap">
+        <canvas id="g" aria-label="Graf jaringan force-directed"></canvas>
+        <div class="gcount" id="gcount"></div>
+        <div class="zoom">
+          <button type="button" id="zIn" aria-label="Perbesar">+</button>
+          <button type="button" id="zOut" aria-label="Perkecil">−</button>
+          <button type="button" id="zFit" aria-label="Sesuaikan ke layar">⤢</button>
+        </div>
+        <div class="tip" id="tip"></div>
+        <div class="busy" id="busy">Menghitung layout…</div>
+      </div>
+      <div class="legend-note">Ukuran node = PageRank · warna = komunitas Louvain · arah panah = author → target_user · ketebalan edge = jumlah interaksi. Klik node untuk menyorot tetangganya; klik area kosong untuk melepas.</div>
+    </div>
+
+    <aside class="panel right" aria-label="Komunitas dan insight node">
+      <h2>Komunitas</h2>
+      <div class="small" id="commMeta"></div>
+      <div class="comm-list" id="commList"></div>
+      <div class="grp">
+        <label for="search">Cari aktor</label>
+        <input type="search" id="search" list="actors" placeholder="ketik nama akun…">
+        <datalist id="actors"></datalist>
+      </div>
+      <div class="insight" id="insight"><span class="muted">Pilih node pada graf atau tabel untuk melihat metriknya.</span></div>
+    </aside>
+  </section>
+
+  <section aria-label="Aktor teratas">
+    <div class="tables" id="tables"></div>
+  </section>
+
+  <section class="notes" aria-label="Catatan metode">
+    <div>
+      <h3>Cara data dibaca</h3>
+      <ul>
+        <li>Baris <code>type</code> = <code>retweet</code> (juga <code>rt</code>) masuk jaringan retweet; <code>reply</code> masuk jaringan reply. Baris <code>tweet</code> hanya dihitung di ringkasan.</li>
+        <li>Nama akun dinormalisasi: <code>@</code> dibuang, huruf kecil. <code>target_user</code> berisi beberapa akun (dipisah koma/spasi) dibuat menjadi beberapa edge.</li>
+        <li>Retweet/reply tanpa <code>target_user</code> dilewati dan dilaporkan di status.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Definisi metrik</h3>
+      <ul>
+        <li><b>In-degree / out-degree</b>: jumlah aktor unik yang mengarah ke / dituju aktor; mode berbobot menjumlahkan interaksi.</li>
+        <li><b>Betweenness</b>: Brandes pada graf berarah, dinormalisasi 1/((n−1)(n−2)). Bobot <em>tidak</em> dipakai sebagai jarak, karena bobot di sini berarti kedekatan, bukan biaya.</li>
+        <li><b>PageRank</b>: berbobot, α = 0,85.</li>
+        <li><b>Louvain</b>: modularitas berarah berbobot, seed tetap (42) agar hasil dapat direproduksi.</li>
+        <li><b>Normalisasi association strength</b>: s<sub>ij</sub> = 2m·a<sub>ij</sub>/(k<sub>i</sub>k<sub>j</sub>), k = total kekuatan node (in+out), m = total bobot. Mengurangi dominasi akun hub sehingga keterkaitan antarakun kecil lebih terlihat. <em>None</em> memakai jumlah interaksi apa adanya.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Batas interpretasi</h3>
+      <ul>
+        <li>Komunitas Louvain adalah partisi struktural, bukan bukti kesamaan ideologi. Validasi dengan membaca isi <code>text</code>.</li>
+        <li>Louvain bersifat heuristik; resolusi dan seed berbeda dapat menggeser batas komunitas kecil.</li>
+        <li>Layout (VOS mapping atau ForceAtlas2) hanya alat bantu visual. Jarak dan posisi tengah/pinggir di layar bukan ukuran statistik; untuk peran jembatan, pakai nilai betweenness.</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script src="lib/papaparse.min.js"></script>
+<script src="lib/d3.min.js"></script>
+<script src="lib/graphology.umd.min.js"></script>
+<script src="lib/graphology-library.min.js"></script>
+<script src="lib/jszip.min.js"></script>
+<script>
+(function(){
+"use strict";
+const L = window.graphologyLibrary, G = window.graphology;
+const $ = id => document.getElementById(id);
+const PALETTE = ['#2f6fd6','#e0533d','#24a06b','#d9931a','#8a4fd1','#d1478f','#1f9bb5','#7f8f22','#b5662e','#4a5bd1','#c43c5c','#3c8f8f'];
+const OTHER = '#9aa3b2';
+const fmtInt = n => n.toLocaleString('id-ID');
+const fmtDec = (n,d=4) => (n==null||isNaN(n)) ? '–' : n.toLocaleString('id-ID',{minimumFractionDigits:d,maximumFractionDigits:d});
+const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
+
+const S = {
+  rows:[], source:'', net:'retweet', maxNodes:200, labelN:25, edgeOp:.4, minW:1, degMode:'unique',
+  res:1, norm:'none', alg:'vos', dropSelf:true, dFrom:null, dTo:null, selected:null, hover:null, focusComm:null,
+  nets:{retweet:null, reply:null}, summary:null, layout:null, transform:d3.zoomIdentity, dl:null
+};
+
+/* ---------- status ---------- */
+function status(msg, kind){ const el=$('status'); el.className='status'+(kind?' '+kind:''); el.innerHTML=msg; }
+
+/* ---------- parsing ---------- */
+const NETS = ['retweet','reply','mention'];
+const VERB = {retweet:['me-retweet','di-retweet'], reply:['membalas/mengomentari','dibalas/dikomentari'], mention:['menyebut (mention)','disebut']};
+const TYPE_MAP = {mention:'mention', comment:'reply', retweet:'retweet', rt:'retweet', retweeted:'retweet', repost:'retweet', reply:'reply', replied:'reply', balasan:'reply', tweet:'tweet', original:'tweet', post:'tweet', quote:'quote'};
+function normUser(u){ return String(u||'').trim().replace(/^@+/,'').toLowerCase(); }
+
+function ingest(text, sourceName){
+  const res = Papa.parse(text,{header:true, skipEmptyLines:'greedy', transformHeader:h=>h.trim().toLowerCase().replace(/^﻿/,'')});
+  const fields = res.meta.fields||[];
+  const need = ['author','text','type','target_user','created_at'];
+  const missing = need.filter(f=>!fields.includes(f));
+  const hard = ['author','type','target_user'].filter(f=>missing.includes(f));
+  if(hard.length){ status(`Kolom wajib tidak ditemukan: <b>${hard.join(', ')}</b>. Kolom yang terbaca: ${esc(fields.join(', ')||'(kosong)')}. Pastikan baris pertama CSV berisi nama kolom.`,'err'); return; }
+  const rows=[]; const displayName=new Map();
+  for(const r of res.data){
+    const aRaw=String(r.author||'').trim(); const a=normUser(aRaw); if(!a) continue;
+    if(!displayName.has(a)) displayName.set(a, aRaw.replace(/^@+/,''));
+    const t = TYPE_MAP[String(r.type||'').trim().toLowerCase()] || 'other';
+    const targetsRaw = String(r.target_user||'').split(/[,;\s]+/).map(s=>s.trim().replace(/^@+/,'')).filter(Boolean);
+    const targets = targetsRaw.map(x=>x.toLowerCase());
+    targetsRaw.forEach((x,i)=>{ if(!displayName.has(targets[i])) displayName.set(targets[i], x); });
+    const ts = r.created_at ? Date.parse(String(r.created_at).trim()) : NaN;
+    rows.push({a, t, targets, ts: isNaN(ts)?null:ts, plat:String(r.platform||'').trim().toLowerCase(), party:String(r.party||'').trim().toUpperCase(), text:String(r.text||'')});
+  }
+  S.rows=rows; S.names=displayName;
+  fillFilter('fPlat', rows.map(r=>r.plat)); fillFilter('fParty', rows.map(r=>r.party)); S.fPlat=''; S.fParty=''; S.source=sourceName; S.selected=null; S.focusComm=null;
+  const tsAll=rows.map(r=>r.ts).filter(v=>v!=null);
+  if(tsAll.length){ const mn=new Date(Math.min(...tsAll)), mx=new Date(Math.max(...tsAll)); $('dFrom').value=iso(mn); $('dTo').value=iso(mx); S.dFrom=startOfDay(mn); S.dTo=endOfDay(mx); }
+  else { $('dFrom').value=''; $('dTo').value=''; S.dFrom=S.dTo=null; }
+  S.parseNote = (missing.length?` Kolom opsional tidak ada: ${missing.join(', ')}.`:'') + (res.errors.length?` ${res.errors.length} baris bermasalah saat parsing dilewati.`:'');
+  rebuild();
+}
+const iso = d => d.toISOString().slice(0,10);
+const startOfDay = d => Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());
+const endOfDay = d => startOfDay(d)+86400000-1;
+
+/* ---------- network building ---------- */
+function buildNet(type, rows){
+  const g = new G.DirectedGraph();
+  let skipped=0, selfLoops=0, interactions=0;
+  for(const r of rows){
+    if(r.t!==type) continue;
+    if(!r.targets.length){ skipped++; continue; }
+    for(const tg of r.targets){
+      if(tg===r.a){ selfLoops++; if(S.dropSelf) continue; }
+      if(!g.hasNode(r.a)) g.addNode(r.a,{label:S.names.get(r.a)||r.a});
+      if(!g.hasNode(tg)) g.addNode(tg,{label:S.names.get(tg)||tg});
+      if(g.hasEdge(r.a,tg)) g.updateEdgeAttribute(r.a,tg,'weight',w=>w+1);
+      else g.addEdge(r.a,tg,{weight:1});
+      interactions++;
+    }
+  }
+  return {g, skipped, selfLoops, interactions};
+}
+
+function computeMetrics(net){
+  const g=net.g, M={};
+  g.forEachNode(n=>{
+    let win=0,wout=0;
+    g.forEachInEdge(n,(e,a)=>{win+=a.weight;}); g.forEachOutEdge(n,(e,a)=>{wout+=a.weight;});
+    M[n]={indeg:g.inDegree(n), outdeg:g.outDegree(n), win, wout, betw:0, pr:0, comm:-1};
+  });
+  net.M=M;
+  if(g.order===0){ net.commCount=0; net.Q=NaN; return; }
+  const pr = L.metrics.centrality.pagerank(g,{getEdgeWeight:'weight', alpha:0.85, maxIterations:200, tolerance:1e-8});
+  for(const n in pr) M[n].pr=pr[n];
+  const work = g.order*Math.max(g.size,1);
+  net.betwSkipped=false;
+  if(work>4e8 && !net.forceBetw){ net.betwSkipped=true; }
+  else { const b = L.metrics.centrality.betweenness(g,{getEdgeWeight:null, normalized:true}); for(const n in b) M[n].betw=b[n]||0; }
+  runLouvain(net);
+}
+
+/* Association strength (van Eck & Waltman, 2009): s_ij = 2m·a_ij / (k_i·k_j),
+   k_i = total strength (in + out) of node i on the full graph, m = total edge weight.
+   Rescaled so the mean normalized weight is 1 (modularity is scale-invariant; keeps the layout comparable). */
+function applyNorm(net){
+  const g=net.g; if(!g.size) return;
+  if(S.norm==='none'){ g.forEachEdge((e,a)=>g.setEdgeAttribute(e,'nw',a.weight)); return; }
+  const M=net.M; let m=0; g.forEachEdge((e,a)=>{m+=a.weight;});
+  let sum=0; const vals=[];
+  g.forEachEdge((e,a,s,t)=>{ const ks=M[s].win+M[s].wout, kt=M[t].win+M[t].wout; const v=2*m*a.weight/(ks*kt); vals.push([e,v]); sum+=v; });
+  const mean=sum/vals.length||1;
+  for(const [e,v] of vals) g.setEdgeAttribute(e,'nw',v/mean);
+}
+function runLouvain(net){
+  const g=net.g; if(g.order===0) return;
+  applyNorm(net);
+  let det;
+  if(g.size===0){ det={communities:{},count:0,modularity:NaN}; g.forEachNode((n,i)=>{det.communities[n]=det.count++;}); }
+  else det = L.communitiesLouvain.detailed(g,{getEdgeWeight:'nw', resolution:S.res, rng:mulberry32(42)});
+  // rank communities by size, then by total PageRank
+  const agg={};
+  for(const n in det.communities){ const c=det.communities[n]; (agg[c]=agg[c]||{size:0,pr:0,members:[]}); agg[c].size++; agg[c].pr+=net.M[n].pr; agg[c].members.push(n); }
+  const order=Object.keys(agg).sort((x,y)=>agg[y].size-agg[x].size||agg[y].pr-agg[x].pr);
+  const remap={}; order.forEach((c,i)=>remap[c]=i);
+  net.comms = order.map((c,i)=>{ const m=agg[c].members.sort((a,b)=>net.M[b].pr-net.M[a].pr); return {id:i,size:agg[c].size,pr:agg[c].pr,top:m.slice(0,3)}; });
+  for(const n in det.communities) net.M[n].comm=remap[det.communities[n]];
+  net.commCount=order.length; net.Q=det.modularity;
+}
+const commColor = c => (c>=0 && c<PALETTE.length) ? PALETTE[c] : OTHER;
+
+/* ---------- rebuild pipeline ---------- */
+function fillFilter(id, vals){
+  const u=[...new Set(vals.filter(Boolean))].sort(); const el=$(id);
+  el.innerHTML='<option value="">Semua</option>'+u.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  el.closest('.grp').style.display=u.length?'':'none';
+}
+function filteredRows(){
+  return S.rows.filter(r=>{
+    if(S.fPlat && r.plat!==S.fPlat) return false;
+    if(S.fParty && r.party!==S.fParty) return false;
+    if(S.dFrom==null && S.dTo==null) return true;
+    if(r.ts==null) return false;
+    return (S.dFrom==null||r.ts>=S.dFrom) && (S.dTo==null||r.ts<=S.dTo);
+  });
+}
+function rebuild(){
+  if(!S.rows.length){ return; }
+  status('Menghitung metrik…');
+  setTimeout(()=>{
+    const t0=performance.now();
+    const rows=filteredRows();
+    const cnt={tweet:0,retweet:0,reply:0,quote:0,other:0}; const authors=new Set();
+    let undated=0;
+    for(const r of S.rows){ if(r.ts==null) undated++; }
+    for(const r of rows){ cnt[r.t]=(cnt[r.t]||0)+1; authors.add(r.a); }
+    for(const type of NETS){ const net=buildNet(type,rows); computeMetrics(net); S.nets[type]=net; }
+    S.summary={rows:rows.length,total:S.rows.length,cnt,authors:authors.size,undated};
+    const dt=Math.round(performance.now()-t0);
+    const sk=S.nets.retweet.skipped+S.nets.reply.skipped;
+    const dateNote = (S.dFrom!=null && undated) ? ` ${fmtInt(undated)} baris tanpa created_at valid dikeluarkan oleh filter tanggal.` : '';
+    const msg=`<b>${esc(S.source)}</b>: ${fmtInt(rows.length)} dari ${fmtInt(S.rows.length)} baris dipakai, dihitung dalam ${fmtInt(dt)} ms.`+
+      (sk?` ${fmtInt(sk)} retweet/reply tanpa target_user dilewati.`:'')+dateNote+(S.parseNote||'')+
+      (S.nets.retweet.betwSkipped||S.nets.reply.betwSkipped?' Betweenness dilewati karena graf terlalu besar; <button class="btn" id="forceB" type="button">hitung tetap</button>':'');
+    status(msg, (sk||S.parseNote||dateNote)?'warn':'');
+    const fb=$('forceB'); if(fb) fb.onclick=()=>{ for(const t of NETS){ const n=S.nets[t]; n.forceBetw=true; status('Menghitung betweenness…'); } setTimeout(()=>{ for(const t of NETS){ const n=S.nets[t]; const b=L.metrics.centrality.betweenness(n.g,{getEdgeWeight:null,normalized:true}); for(const k in b) n.M[k].betw=b[k]||0; n.betwSkipped=false; } status('Betweenness selesai dihitung.'); renderAll(false); },30); };
+    $('dataPill').textContent = S.source.startsWith('Contoh') ? 'contoh sintetis' : 'data unggahan';
+    $('dataPill').className = 'pill' + (S.source.startsWith('Contoh') ? '' : ' live');
+    const maxN=Math.max(S.nets.retweet.g.order,S.nets.reply.g.order,20);
+    const mx=$('maxNodes'); mx.max=Math.max(20,Math.ceil(maxN/10)*10);
+    if(+mx.value>+mx.max){ mx.value=mx.max; }
+    S.maxNodes=+mx.value; $('oMax').textContent=S.maxNodes;
+    const maxW=Math.max(1,...NETS.flatMap(t=>S.nets[t].g.mapEdges((e,a)=>a.weight)));
+    $('minW').max=Math.min(Math.max(maxW,2),50);
+    renderAll(true);
+  },20);
+}
+
+function renderAll(relayout){
+  renderKpis(); renderComms(); renderTables(); renderInsight(); fillDatalist();
+  if(relayout) doLayout(); else draw();
+}
+
+/* ---------- KPIs ---------- */
+function renderKpis(){
+  const s=S.summary, net=S.nets[S.net], g=net.g;
+  const dens = g.order>1 ? g.size/(g.order*(g.order-1)) : 0;
+  const items=[
+    [fmtInt(s.rows),'baris dianalisis'],[fmtInt(s.authors),'author unik'],
+    [fmtInt(s.cnt.tweet||0),'tweet'],[fmtInt(s.cnt.retweet||0),'retweet'],[fmtInt(s.cnt.reply||0),'reply'],
+    [fmtInt(g.order),`node ${S.net}`],[fmtInt(g.size),`edge ${S.net}`],[fmtInt(net.interactions),'interaksi (bobot)'],
+    [fmtDec(dens,4),'densitas'],[fmtInt(net.commCount||0),'komunitas'],[isNaN(net.Q)?'–':fmtDec(net.Q,3),'modularitas Q']
+  ];
+  $('kpis').innerHTML=items.map(([v,l])=>`<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join('');
+}
+
+/* ---------- communities ---------- */
+function renderComms(){
+  const net=S.nets[S.net];
+  const total=net.g.order||1;
+  $('commMeta').textContent = net.g.order ? `${fmtInt(net.commCount)} komunitas · Q = ${isNaN(net.Q)?'–':fmtDec(net.Q,3)} · resolusi ${S.res.toFixed(1)} · normalisasi ${S.norm==='none'?'none':'association strength'}` : 'Jaringan ini kosong.';
+  const list=(net.comms||[]).slice(0,PALETTE.length);
+  const rest=(net.comms||[]).slice(PALETTE.length);
+  let html=`<button type="button" class="comm" data-c="" aria-pressed="${S.focusComm==null}"><span class="dot" style="background:var(--line)"></span><span class="nm">Semua komunitas</span><span class="ct">${fmtInt(net.g.order)}</span></button>`;
+  html+=list.map(c=>`<button type="button" class="comm" data-c="${c.id}" aria-pressed="${S.focusComm===c.id}"><span class="dot" style="background:${commColor(c.id)}"></span><span class="nm">K${c.id+1} <small>${esc(c.top.map(n=>net.g.getNodeAttribute(n,'label')).slice(0,2).join(', '))}</small></span><span class="ct">${fmtInt(c.size)}</span><span class="bar-mini"><i style="width:${(c.size/total*100).toFixed(1)}%;background:${commColor(c.id)}"></i></span></button>`).join('');
+  if(rest.length){ const n=rest.reduce((s,c)=>s+c.size,0); html+=`<div class="comm" style="cursor:default"><span class="dot" style="background:${OTHER}"></span><span class="nm">${fmtInt(rest.length)} komunitas kecil lain</span><span class="ct">${fmtInt(n)}</span></div>`; }
+  $('commList').innerHTML=html;
+  $('commList').querySelectorAll('button.comm').forEach(b=>b.onclick=()=>{ S.focusComm = b.dataset.c===''?null:+b.dataset.c; renderComms(); draw(); });
+}
+
+/* ---------- tables ---------- */
+function metricDefs(){
+  const w=S.degMode==='weighted';
+  return [
+    {key:w?'win':'indeg', title:'In-degree', desc:w?'Total interaksi diterima (berbobot).':`Jumlah akun unik yang ${VERB[S.net][0]} aktor ini.`, dec:0, alt:w?'indeg':'win', altLbl:w?'unik':'bobot'},
+    {key:w?'wout':'outdeg', title:'Out-degree', desc:w?'Total interaksi dikirim (berbobot).':`Jumlah akun unik yang ${VERB[S.net][1]} aktor ini.`, dec:0, alt:w?'outdeg':'wout', altLbl:w?'unik':'bobot'},
+    {key:'betw', title:'Betweenness', desc:'Seberapa sering aktor berada di jalur terpendek antaraktor (penghubung/broker).', dec:4},
+    {key:'pr', title:'PageRank', desc:'Pengaruh rekursif: dirujuk oleh aktor yang juga banyak dirujuk.', dec:4}
+  ];
+}
+function topBy(M,key,k=10){ return Object.keys(M).sort((a,b)=>M[b][key]-M[a][key]||a.localeCompare(b)).slice(0,k); }
+function renderTables(){
+  const net=S.nets[S.net], M=net.M, g=net.g;
+  $('tables').innerHTML = metricDefs().map(d=>{
+    const top=topBy(M,d.key);
+    const skipped = d.key==='betw' && net.betwSkipped;
+    const rows = skipped ? `<tr><td colspan="4" class="muted">Belum dihitung (graf besar).</td></tr>` :
+      top.length ? top.map((n,i)=>`<tr class="${S.selected===n?'sel':''}"><td class="rk">${i+1}</td><td class="actor"><button type="button" data-n="${esc(n)}"><span class="dot" style="background:${commColor(M[n].comm)};width:9px;height:9px"></span><span class="n">${esc(g.getNodeAttribute(n,'label'))}</span></button></td><td class="num">${d.dec?fmtDec(M[n][d.key],d.dec):fmtInt(M[n][d.key])}</td>${d.alt?`<td class="num muted">${fmtInt(M[n][d.alt])}</td>`:''}</tr>`).join('') : `<tr><td colspan="4" class="muted">Tidak ada data.</td></tr>`;
+    return `<div class="card"><h2>${d.title} · ${S.net}</h2><p class="desc">${d.desc}</p><table><thead><tr><th>#</th><th>Aktor</th><th class="num">Nilai</th>${d.alt?`<th class="num">${d.altLbl}</th>`:''}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  }).join('');
+  $('tables').querySelectorAll('td.actor button').forEach(b=>b.onclick=()=>selectNode(b.dataset.n, true));
+}
+
+/* ---------- insight ---------- */
+function rankOf(M,n,key){ let r=1; const v=M[n][key]; for(const k in M) if(M[k][key]>v) r++; return r; }
+function renderInsight(){
+  const el=$('insight'), net=S.nets[S.net];
+  const n=S.selected;
+  if(!n || !net.g.hasNode(n)){ el.innerHTML='<span class="muted">Pilih node pada graf atau tabel untuk melihat metriknya.</span>'; return; }
+  const g=net.g, m=net.M[n], N=g.order;
+  const ins=[], outs=[];
+  g.forEachInEdge(n,(e,a,s)=>ins.push([s,a.weight])); g.forEachOutEdge(n,(e,a,s,t)=>outs.push([t,a.weight]));
+  ins.sort((a,b)=>b[1]-a[1]); outs.sort((a,b)=>b[1]-a[1]);
+  const li=arr=>arr.slice(0,5).map(([k,w])=>`<li><button type="button" data-n="${esc(k)}">${esc(g.getNodeAttribute(k,'label'))}</button><span>${fmtInt(w)}×</span></li>`).join('')||'<li class="muted">–</li>';
+  const verbIn = `Paling sering ${VERB[S.net][0]} aktor ini`;
+  const verbOut = `Paling sering ${VERB[S.net][1]} aktor ini`;
+  el.innerHTML=`<div class="who"><span class="dot" style="background:${commColor(m.comm)}"></span>${esc(g.getNodeAttribute(n,'label'))}</div>
+   <div class="small">Komunitas K${m.comm+1} · peringkat PageRank ${fmtInt(rankOf(net.M,n,'pr'))} dari ${fmtInt(N)}</div>
+   <div class="mgrid">
+    <div><span>In-degree (unik/bobot)</span><b>${fmtInt(m.indeg)} / ${fmtInt(m.win)}</b></div>
+    <div><span>Out-degree (unik/bobot)</span><b>${fmtInt(m.outdeg)} / ${fmtInt(m.wout)}</b></div>
+    <div><span>Betweenness</span><b>${net.betwSkipped?'–':fmtDec(m.betw,4)}</b></div>
+    <div><span>PageRank</span><b>${fmtDec(m.pr,4)}</b></div>
+   </div>
+   <div><div class="small" style="margin-bottom:3px">${verbIn}</div><ul class="nlist">${li(ins)}</ul></div>
+   <div><div class="small" style="margin-bottom:3px">${verbOut}</div><ul class="nlist">${li(outs)}</ul></div>`;
+  const ex=filteredRows().filter(r=>r.a===n && r.t===S.net && r.text).slice(0,3);
+  if(ex.length) el.insertAdjacentHTML('beforeend',`<div><div class="small" style="margin-bottom:3px">Contoh teks (${S.net})</div>${ex.map(r=>`<p class="small" style="margin:0 0 4px;color:var(--ink);border-left:2px solid var(--line);padding-left:6px">${esc(r.text.slice(0,220))}${r.text.length>220?'…':''}</p>`).join('')}</div>`);
+  el.querySelectorAll('.nlist button').forEach(b=>b.onclick=()=>selectNode(b.dataset.n,true));
+}
+function fillDatalist(){
+  const net=S.nets[S.net];
+  const ids=topBy(net.M,'pr',2000);
+  $('actors').innerHTML=ids.map(n=>`<option value="${esc(net.g.getNodeAttribute(n,'label'))}"></option>`).join('');
+}
+function selectNode(n, center){
+  S.selected=n; renderInsight(); renderTables();
+  if(center && S.layout && S.layout.pos.has(n)){
+    const p=S.layout.pos.get(n), c=canvas.getBoundingClientRect();
+    const k=Math.max(S.transform.k,1.5);
+    d3.select(canvas).transition().duration(450).call(zoom.transform, d3.zoomIdentity.translate(c.width/2-p.x*k, c.height/2-p.y*k).scale(k));
+  } else draw();
+}
+
+/* ---------- layout ---------- */
+function displayedNodes(net){
+  return topBy(net.M,'pr',S.maxNodes);
+}
+/* VOS mapping (van Eck, Waltman et al.): minimize Σ s_ij·d_ij²/2 − Σ d_ij over all pairs.
+   Direction is ignored (s_ij = s(i→j) + s(j→i)), as in VOSviewer. A weak all-pairs attraction (ε = 1/n)
+   keeps disconnected components from drifting apart without bound. */
+function vosLayout(ids, net, init){
+  const n=ids.length, idx=new Map(ids.map((k,i)=>[k,i]));
+  const pairW=new Map();
+  net.g.forEachEdge((e,a,s,t)=>{ if(!idx.has(s)||!idx.has(t)) return; let i=idx.get(s), j=idx.get(t); if(i===j) return; if(i>j){const x=i;i=j;j=x;} const k=i*n+j; pairW.set(k,(pairW.get(k)||0)+(S.norm==='none'?a.weight:(a.nw!=null?a.nw:a.weight))); });
+  const EI=[],EJ=[],EW=[]; let sum=0; for(const [k,w] of pairW){ EI.push(Math.floor(k/n)); EJ.push(k%n); EW.push(w); sum+=w; }
+  const mean=EW.length?sum/EW.length:1; for(let e=0;e<EW.length;e++) EW[e]/=mean;
+  const eps=1/Math.max(n,1);
+  const X=new Float64Array(n), Y=new Float64Array(n);
+  ids.forEach((k,i)=>{ X[i]=init[i][0]/100; Y[i]=init[i][1]/100; });
+  const diag=new Float64Array(n).fill(eps*(n-1));
+  for(let e=0;e<EW.length;e++){ diag[EI[e]]+=EW[e]; diag[EJ[e]]+=EW[e]; }
+  const GX=new Float64Array(n), GY=new Float64Array(n);
+  const iters = n<=300?300 : n<=600?200 : 120;
+  for(let it=0; it<iters; it++){
+    GX.fill(0); GY.fill(0);
+    for(let i=0;i<n;i++){ const xi=X[i], yi=Y[i]; for(let j=i+1;j<n;j++){
+      const dx=xi-X[j], dy=yi-Y[j]; const d=Math.sqrt(dx*dx+dy*dy)||1e-9;
+      const f=eps-1/d; GX[i]+=f*dx; GY[i]+=f*dy; GX[j]-=f*dx; GY[j]-=f*dy; } }
+    for(let e=0;e<EW.length;e++){ const i=EI[e], j=EJ[e], w=EW[e]; const dx=X[i]-X[j], dy=Y[i]-Y[j]; GX[i]+=w*dx; GY[i]+=w*dy; GX[j]-=w*dx; GY[j]-=w*dy; }
+    const eta = 0.6*(1-it/iters)+0.05;
+    for(let i=0;i<n;i++){ X[i]-=eta*GX[i]/diag[i]; Y[i]-=eta*GY[i]/diag[i]; }
+  }
+  const pos=new Map(); ids.forEach((k,i)=>pos.set(k,{x:X[i]*100,y:Y[i]*100})); return pos;
+}
+function doLayout(){
+  const net=S.nets[S.net]; const g=net.g;
+  $('gTitle').firstChild.textContent = `Graf ${S.net} `;
+  if(!g.order){ S.layout={nodes:[],edges:[],pos:new Map()}; draw(); return; }
+  $('busy').classList.add('on'); window.__layoutDone=false;
+  setTimeout(()=>{
+    const ids=displayedNodes(net); const set=new Set(ids);
+    const sub=new G.DirectedGraph();
+    const rnd=mulberry32(7);
+    const nc=Math.max(1,net.commCount);
+    ids.forEach(n=>{
+      const c=net.M[n].comm, ang=2*Math.PI*(c%12)/Math.min(nc,12)+ (c>=12?0.3:0);
+      const R=100+ (c>=12?60:0);
+      sub.addNode(n,{x:R*Math.cos(ang)+rnd()*40-20, y:R*Math.sin(ang)+rnd()*40-20, size:1+Math.sqrt(net.M[n].pr*ids.length)*3});
+    });
+    g.forEachEdge((e,a,s,t)=>{ if(set.has(s)&&set.has(t)) sub.addEdge(s,t,{weight:a.nw!=null?a.nw:a.weight, raw:a.weight}); });
+    const settings=Object.assign(L.layoutForceAtlas2.inferSettings(sub),{gravity:1.2, scalingRatio:ids.length>300?20:10, barnesHutOptimize:ids.length>350, adjustSizes:false, edgeWeightInfluence:0.6});
+    const iters = ids.length<200?600: ids.length<600?350:200;
+    let pos;
+    if(S.alg==='vos'){ pos=vosLayout(ids, net, ids.map(n=>[sub.getNodeAttribute(n,'x'),sub.getNodeAttribute(n,'y')])); }
+    else { if(sub.size>0) L.layoutForceAtlas2.assign(sub,{iterations:iters, settings}); pos=new Map(); sub.forEachNode((n,a)=>pos.set(n,{x:a.x,y:a.y})); }
+    const edges=[]; sub.forEachEdge((e,a,s,t)=>edges.push({s,t,w:a.raw}));
+    edges.sort((x,y)=>x.w-y.w);
+    S.layout={net:S.net,nodes:ids,edges,pos,sub};
+    $('gSub').textContent = `${fmtInt(ids.length)} dari ${fmtInt(g.order)} node · ${fmtInt(edges.length)} edge tampil`;
+    $('busy').classList.remove('on'); window.__layoutDone=true; window.__pos=pos; window.__M=net.M;
+    fit(false);
+  },30);
+}
+
+/* ---------- canvas ---------- */
+const canvas=$('g'); const ctx=canvas.getContext('2d');
+let W=0,H=0;
+function resize(){
+  const r=$('cwrap').getBoundingClientRect(); const dpr=window.devicePixelRatio||1;
+  W=r.width; H=r.height; canvas.width=Math.round(W*dpr); canvas.height=Math.round(H*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0); draw();
+}
+new ResizeObserver(resize).observe($('cwrap'));
+const zoom=d3.zoom().scaleExtent([0.05,20]).on('zoom',ev=>{S.transform=ev.transform; draw();});
+d3.select(canvas).call(zoom).on('dblclick.zoom',null);
+function fit(animate){
+  if(!S.layout||!S.layout.nodes.length){ draw(); return; }
+  let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
+  for(const p of S.layout.pos.values()){ x0=Math.min(x0,p.x);x1=Math.max(x1,p.x);y0=Math.min(y0,p.y);y1=Math.max(y1,p.y); }
+  const pad=50, w=Math.max(x1-x0,1), h=Math.max(y1-y0,1);
+  const k=Math.min((W-2*pad)/w,(H-2*pad)/h, 4);
+  const t=d3.zoomIdentity.translate(W/2-(x0+w/2)*k, H/2-(y0+h/2)*k).scale(k);
+  const sel=d3.select(canvas); (animate?sel.transition().duration(400):sel).call(zoom.transform,t);
+}
+function nodeRadius(net,n,maxPr){ return 2.5 + 20*Math.sqrt(net.M[n].pr/maxPr); }
+function cssVar(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+function hexA(hex,a){ const h=hex.replace('#',''); const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16); return `rgba(${r},${g},${b},${a})`; }
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const lay=S.layout, net=S.nets[S.net];
+  if(!lay||!net||lay.net!==S.net||!lay.nodes.length){
+    $('gcount').textContent='';
+    ctx.fillStyle=cssVar('--muted'); ctx.font='14px '+cssVar('--f-body'); ctx.textAlign='center';
+    ctx.fillText(net&&net.g.order===0?`Tidak ada interaksi ${S.net} pada data/rentang ini.`:'Unggah CSV atau muat contoh data.', W/2, H/2); return;
+  }
+  const t=S.transform, sk=Math.max(0.55,Math.sqrt(t.k));
+  const maxPr=Math.max(...lay.nodes.map(n=>net.M[n].pr))||1;
+  const focus=S.selected||S.hover;
+  let nb=null; if(focus && net.g.hasNode(focus)){ nb=new Set([focus]); net.g.forEachNeighbor(focus,x=>nb.add(x)); }
+  const fc=S.focusComm;
+  const dim=n=> (nb && !nb.has(n)) || (fc!=null && net.M[n].comm!==fc);
+  const maxW=lay.edges.length?lay.edges[lay.edges.length-1].w:1;
+  const showArrows = t.k>0.9 || lay.nodes.length<=120;
+  let shownE=0;
+  for(const e of lay.edges){
+    if(e.w<S.minW) continue;
+    const ps=lay.pos.get(e.s), pt=lay.pos.get(e.t);
+    const x1=t.applyX(ps.x), y1=t.applyY(ps.y), x2=t.applyX(pt.x), y2=t.applyY(pt.y);
+    if((x1<0&&x2<0)||(x1>W&&x2>W)||(y1<0&&y2<0)||(y1>H&&y2>H)) continue;
+    const isFocusEdge = focus && (e.s===focus||e.t===focus);
+    const faded = (nb && !isFocusEdge) || (fc!=null && (net.M[e.s].comm!==fc||net.M[e.t].comm!==fc));
+    const col=commColor(net.M[e.s].comm);
+    const a = faded ? S.edgeOp*0.12 : (isFocusEdge? Math.min(1,S.edgeOp+0.4) : S.edgeOp);
+    ctx.strokeStyle=hexA(col,a); ctx.fillStyle=ctx.strokeStyle;
+    const lw=(0.6+2.4*Math.log1p(e.w)/Math.log1p(maxW))*(isFocusEdge?1.4:1);
+    ctx.lineWidth=lw;
+    const dx=x2-x1, dy=y2-y1, len=Math.hypot(dx,dy)||1;
+    const rT=nodeRadius(net,e.t,maxPr)*sk;
+    // slight curve so reciprocal edges separate
+    const mx=(x1+x2)/2 - dy*0.08, my=(y1+y2)/2 + dx*0.08;
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.quadraticCurveTo(mx,my,x2,y2); ctx.stroke();
+    shownE++;
+    if(showArrows && len>rT+6){
+      const ax=x2-mx, ay=y2-my, al=Math.hypot(ax,ay)||1, ux=ax/al, uy=ay/al;
+      const tipX=x2-ux*rT, tipY=y2-uy*rT, s=4+lw*1.2;
+      ctx.beginPath(); ctx.moveTo(tipX,tipY); ctx.lineTo(tipX-ux*s-uy*s*0.55, tipY-uy*s+ux*s*0.55); ctx.lineTo(tipX-ux*s+uy*s*0.55, tipY-uy*s-ux*s*0.55); ctx.closePath(); ctx.fill();
+    }
+  }
+  const order=[...lay.nodes].reverse(); // small first, big on top
+  const panel=cssVar('--canvas');
+  for(const n of order){
+    const p=lay.pos.get(n); const x=t.applyX(p.x), y=t.applyY(p.y); const r=nodeRadius(net,n,maxPr)*sk;
+    if(x<-r||x>W+r||y<-r||y>H+r) continue;
+    const d=dim(n);
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
+    ctx.fillStyle=hexA(commColor(net.M[n].comm), d?0.15:0.92); ctx.fill();
+    ctx.lineWidth = n===S.selected?2.5:1; ctx.strokeStyle = n===S.selected? cssVar('--ink') : (d?'transparent':panel); ctx.stroke();
+  }
+  // labels
+  const labelSet=new Set(lay.nodes.slice(0,S.labelN));
+  if(nb) nb.forEach(x=>{ if(lay.pos.has(x)) labelSet.add(x); });
+  if(fc!=null){ for(const x of lay.nodes){ if(net.M[x].comm===fc && labelSet.size<S.labelN+30) labelSet.add(x); } }
+  ctx.textAlign='center'; ctx.textBaseline='top';
+  ctx.lineJoin='round';
+  const ink=cssVar('--ink'), halo=cssVar('--halo');
+  for(const n of lay.nodes){
+    if(!labelSet.has(n)) continue; if(dim(n) && !(nb&&nb.has(n))) continue;
+    const p=lay.pos.get(n); const x=t.applyX(p.x), y=t.applyY(p.y); const r=nodeRadius(net,n,maxPr)*sk;
+    if(x<-50||x>W+50||y<-20||y>H+20) continue;
+    const big = n===focus || lay.nodes.indexOf(n)<5;
+    ctx.font=`${big?600:500} ${big?13:11}px ${cssVar('--f-body')}`;
+    const label=net.g.getNodeAttribute(n,'label');
+    ctx.strokeStyle=halo; ctx.lineWidth=3.5; ctx.strokeText(label,x,y+r+2);
+    ctx.fillStyle=ink; ctx.fillText(label,x,y+r+2);
+  }
+  $('gcount').textContent=`${fmtInt(lay.nodes.length)} node · ${fmtInt(shownE)} edge · ${fmtInt(lay.edges.filter(e=>e.w>=S.minW).reduce((s,e)=>s+e.w,0))} interaksi tampil`;
+}
+
+function pick(mx,my){
+  const lay=S.layout, net=S.nets[S.net]; if(!lay||lay.net!==S.net) return null;
+  const t=S.transform, sk=Math.max(0.55,Math.sqrt(t.k)); const maxPr=Math.max(...lay.nodes.map(n=>net.M[n].pr))||1;
+  let best=null, bd=Infinity;
+  for(const n of lay.nodes){ const p=lay.pos.get(n); const x=t.applyX(p.x), y=t.applyY(p.y); const r=nodeRadius(net,n,maxPr)*sk+3; const d=Math.hypot(mx-x,my-y); if(d<r && d<bd){bd=d;best=n;} }
+  return best;
+}
+canvas.addEventListener('mousemove',ev=>{
+  const r=canvas.getBoundingClientRect(); const mx=ev.clientX-r.left, my=ev.clientY-r.top;
+  const n=pick(mx,my); const tip=$('tip');
+  if(n!==S.hover){ S.hover=n; draw(); }
+  canvas.classList.toggle('hovering',!!n);
+  if(n){ const net=S.nets[S.net], m=net.M[n];
+    tip.innerHTML=`<b>${esc(net.g.getNodeAttribute(n,'label'))}</b><br>K${m.comm+1} · PR ${fmtDec(m.pr,4)}<br>in ${fmtInt(m.indeg)} (${fmtInt(m.win)}×) · out ${fmtInt(m.outdeg)} (${fmtInt(m.wout)}×)<br>betweenness ${net.betwSkipped?'–':fmtDec(m.betw,4)}`;
+    tip.style.display='block'; tip.style.left=Math.min(mx+14,W-250)+'px'; tip.style.top=Math.min(my+14,H-90)+'px';
+  } else tip.style.display='none';
+});
+canvas.addEventListener('mouseleave',()=>{ S.hover=null; $('tip').style.display='none'; draw(); });
+let downAt=null;
+canvas.addEventListener('pointerdown',ev=>{downAt=[ev.clientX,ev.clientY];});
+canvas.addEventListener('click',ev=>{
+  if(downAt && Math.hypot(ev.clientX-downAt[0],ev.clientY-downAt[1])>4) return;
+  const r=canvas.getBoundingClientRect(); const n=pick(ev.clientX-r.left, ev.clientY-r.top);
+  S.selected = n; renderInsight(); renderTables(); draw();
+});
+$('zIn').onclick=()=>d3.select(canvas).transition().duration(250).call(zoom.scaleBy,1.4);
+$('zOut').onclick=()=>d3.select(canvas).transition().duration(250).call(zoom.scaleBy,1/1.4);
+$('zFit').onclick=()=>fit(true);
+$('btnRelayout').onclick=()=>doLayout();
+
+/* ---------- controls ---------- */
+$('segNet').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  S.net=b.dataset.net; $('segNet').querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b));
+  S.focusComm=null; if(S.selected && !S.nets[S.net]?.g.hasNode(S.selected)) S.selected=null;
+  if(S.summary) renderAll(true);
+});
+$('segNorm').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  S.norm=b.dataset.norm; $('segNorm').querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b));
+  if(!S.summary) return; for(const t of NETS) runLouvain(S.nets[t]); S.focusComm=null; renderAll(true);
+});
+$('segAlg').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  S.alg=b.dataset.alg; $('segAlg').querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b));
+  if(S.summary) doLayout();
+});
+let mxTimer;
+$('maxNodes').oninput=e=>{ S.maxNodes=+e.target.value; $('oMax').textContent=S.maxNodes; clearTimeout(mxTimer); mxTimer=setTimeout(()=>{ if(S.summary) doLayout(); },250); };
+$('labelN').oninput=e=>{ S.labelN=+e.target.value; $('oLab').textContent=S.labelN; draw(); };
+$('edgeOp').oninput=e=>{ S.edgeOp=+e.target.value/100; $('oEdge').textContent=e.target.value+'%'; draw(); };
+$('minW').oninput=e=>{ S.minW=+e.target.value; $('oMinW').textContent=S.minW; draw(); };
+$('degMode').onchange=e=>{ S.degMode=e.target.value; if(S.summary) renderTables(); };
+let resTimer;
+$('res').oninput=e=>{ S.res=+e.target.value; $('oRes').textContent=S.res.toFixed(1); clearTimeout(resTimer); resTimer=setTimeout(()=>{ if(!S.summary) return; for(const t of NETS) runLouvain(S.nets[t]); S.focusComm=null; renderAll(true); },300); };
+$('selfLoop').onchange=e=>{ S.dropSelf=e.target.checked; rebuild(); };
+function onDate(){ const f=$('dFrom').value, t=$('dTo').value; S.dFrom=f?Date.parse(f+'T00:00:00Z'):null; S.dTo=t?Date.parse(t+'T23:59:59.999Z'):null; rebuild(); }
+$('dFrom').onchange=onDate; $('dTo').onchange=onDate;
+$('search').onchange=e=>{
+  const q=normUser(e.target.value); const net=S.nets[S.net]; if(!net) return;
+  if(net.g.hasNode(q)){
+    if(S.layout && !S.layout.pos.has(q)) status(`Akun <b>${esc(q)}</b> ada di jaringan tetapi tidak termasuk ${fmtInt(S.maxNodes)} node teratas yang ditampilkan. Metriknya tetap ditampilkan di panel kanan.`,'warn');
+    selectNode(q,true);
+  } else if(q) status(`Akun <b>${esc(q)}</b> tidak ditemukan di jaringan ${S.net}.`,'warn');
+};
+
+/* ---------- file input ---------- */
+function readFile(f){
+  if(!f) return;
+  if(!/\.csv$/i.test(f.name) && f.type && !/csv|text/.test(f.type)){ status(`Berkas <b>${esc(f.name)}</b> bukan CSV. Simpan data sebagai .csv (UTF-8) lalu unggah lagi.`,'err'); return; }
+  status(`Membaca ${esc(f.name)}…`);
+  const fr=new FileReader(); fr.onload=()=>ingest(fr.result, f.name); fr.onerror=()=>status('Berkas gagal dibaca. Coba unggah ulang.','err'); fr.readAsText(f,'utf-8');
+}
+$('file').onchange=e=>{ readFile(e.target.files[0]); e.target.value=''; };
+const drop=$('drop');
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
+drop.addEventListener('drop',e=>readFile(e.dataTransfer.files[0]));
+
+/* ---------- synthetic sample ---------- */
+function sampleCSV(){
+  const rnd=mulberry32(2026);
+  const hex=()=>Math.floor(rnd()*0xffffff).toString(16).padStart(6,'0');
+  const groups=[
+    {hubs:['kanal_berita_a','redaksi_satu'], n:70},
+    {hubs:['ustadz_virtual','kajian_harian'], n:55},
+    {hubs:['aktivis_kampus','forum_mahasiswa'], n:45},
+    {hubs:['akun_satire','meme_politik'], n:35},
+    {hubs:['pengamat_media'], n:20}
+  ];
+  const members=groups.map(gr=>{ const m=[...gr.hubs]; for(let i=0;i<gr.n;i++) m.push('u_'+hex()); return m; });
+  const lines=['author,text,type,target_user,created_at'];
+  const start=Date.UTC(2026,9,1);
+  const ts=()=>new Date(start+Math.floor(rnd()*31*86400000)).toISOString();
+  const pick=a=>a[Math.floor(rnd()*a.length)];
+  const q=s=>'"'+s.replace(/"/g,'""')+'"';
+  groups.forEach((gr,gi)=>{
+    const m=members[gi];
+    gr.hubs.forEach(h=>{ for(let i=0;i<6;i++) lines.push([h,q('Unggahan asli contoh #'+i),'tweet','',ts()].join(',')); });
+    for(const u of m){
+      const k=1+Math.floor(rnd()*4);
+      for(let i=0;i<k;i++){
+        const cross=rnd()<0.12; const gj=cross?Math.floor(rnd()*groups.length):gi;
+        const tg = rnd()<0.7 ? pick(groups[gj].hubs) : pick(members[gj]);
+        if(tg===u) continue;
+        const isRt=rnd()<0.62;
+        lines.push([u, q(isRt?'RT contoh teks':'Balasan contoh teks'), isRt?'retweet':'reply', tg, ts()].join(','));
+      }
+      if(rnd()<0.3) lines.push([u,q('Unggahan asli contoh'),'tweet','',ts()].join(','));
+    }
+  });
+  // a few brokers bridging communities
+  ['pengamat_media','redaksi_satu'].forEach(b=>{ for(let gi=0;gi<4;gi++){ for(let i=0;i<3;i++) lines.push([b,q('Balasan lintas kelompok'),'reply',pick(groups[gi].hubs),ts()].join(',')); } });
+  return lines.join('\n');
+}
+$('btnSample').onclick=()=>ingest(sampleCSV(),'Contoh data sintetis (akun fiktif)');
+
+/* ---------- exports ---------- */
+function xmlEsc(s){ return String(s).replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'}[c])).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,''); }
+function toGexf(type){
+  const net=S.nets[type], g=net.g, M=net.M;
+  const lay = S.layout && S.layout.net===type ? S.layout.pos : null;
+  const rnd=mulberry32(11);
+  const maxPr=Math.max(...Object.values(M).map(m=>m.pr),1e-9);
+  const now=new Date().toISOString().slice(0,10);
+  const out=[];
+  out.push('<?xml version="1.0" encoding="UTF-8"?>');
+  out.push('<gexf xmlns="http://gexf.net/1.3" xmlns:viz="http://gexf.net/1.3/viz" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://gexf.net/1.3 http://gexf.net/1.3/gexf.xsd" version="1.3">');
+  out.push(`  <meta lastmodifieddate="${now}"><creator>SNA Explorer</creator><description>Jaringan ${type} berarah author-&gt;target_user; bobot = jumlah interaksi. Sumber: ${xmlEsc(S.source)}. Resolusi Louvain ${S.res}; normalisasi ${S.norm}.</description></meta>`);
+  out.push('  <graph mode="static" defaultedgetype="directed">');
+  out.push('    <attributes class="node">');
+  [['0','indegree','integer'],['1','outdegree','integer'],['2','weighted_indegree','integer'],['3','weighted_outdegree','integer'],['4','betweenness','double'],['5','pagerank','double'],['6','community','integer']].forEach(([i,t,ty])=>out.push(`      <attribute id="${i}" title="${t}" type="${ty}"/>`));
+  out.push('    </attributes>');
+  out.push('    <nodes>');
+  g.forEachNode((n,a)=>{
+    const m=M[n]; const c=commColor(m.comm); const r=parseInt(c.slice(1,3),16),gg=parseInt(c.slice(3,5),16),b=parseInt(c.slice(5,7),16);
+    const p = lay && lay.get(n) ? lay.get(n) : {x:(rnd()-0.5)*1000, y:(rnd()-0.5)*1000};
+    out.push(`      <node id="${xmlEsc(n)}" label="${xmlEsc(a.label)}"><attvalues><attvalue for="0" value="${m.indeg}"/><attvalue for="1" value="${m.outdeg}"/><attvalue for="2" value="${m.win}"/><attvalue for="3" value="${m.wout}"/><attvalue for="4" value="${net.betwSkipped?'':m.betw}"/><attvalue for="5" value="${m.pr}"/><attvalue for="6" value="${m.comm}"/></attvalues><viz:color r="${r}" g="${gg}" b="${b}"/><viz:size value="${(2+28*Math.sqrt(m.pr/maxPr)).toFixed(3)}"/><viz:position x="${p.x.toFixed(3)}" y="${(-p.y).toFixed(3)}" z="0"/></node>`);
+  });
+  out.push('    </nodes>');
+  out.push('    <edges>');
+  let i=0; g.forEachEdge((e,a,s,t)=>{ out.push(`      <edge id="${i++}" source="${xmlEsc(s)}" target="${xmlEsc(t)}" weight="${a.weight}"/>`); });
+  out.push('    </edges>');
+  out.push('  </graph>');
+  out.push('</gexf>');
+  return out.join('\n');
+}
+function metricsCSV(){
+  const lines=['network,actor,indegree,outdegree,weighted_indegree,weighted_outdegree,betweenness,pagerank,community'];
+  for(const type of NETS){ const net=S.nets[type]; net.g.forEachNode((n,a)=>{ const m=net.M[n]; lines.push([type,'"'+String(a.label).replace(/"/g,'""')+'"',m.indeg,m.outdeg,m.win,m.wout,net.betwSkipped?'':m.betw,m.pr,m.comm+1].join(',')); }); }
+  return lines.join('\n');
+}
+async function saveFile(filename, data){
+  try{
+    if(S.dl){ await S.dl.save({filename, data}); status(`Berkas <b>${esc(filename)}</b> disimpan.`); return; }
+  }catch(err){
+    if(err && err.code==='declined'){ status('Penyimpanan dibatalkan.'); return; }
+    if(err && err.code==='rate_limited'){ status('Masih ada dialog simpan yang terbuka. Tunggu sebentar lalu coba lagi.','warn'); return; }
+  }
+  try{ // fallback when the page is opened outside the hosted viewer
+    const url=URL.createObjectURL(data instanceof Blob?data:new Blob([data])); const a=document.createElement('a'); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),2000);
+    status(`Mengunduh <b>${esc(filename)}</b>. Jika tidak ada berkas yang muncul, gunakan tombol "Salin GEXF".`,'warn');
+  }catch(e){ status('Unduhan tidak tersedia di tampilan ini. Gunakan tombol "Salin GEXF".','err'); }
+}
+const stamp=()=>new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');
+$('btnGexf').onclick=async()=>{
+  if(!S.summary){ status('Muat data terlebih dahulu.','warn'); return; }
+  const zip=new JSZip(); zip.file('retweet.gexf',toGexf('retweet')); zip.file('reply.gexf',toGexf('reply')); zip.file('mention.gexf',toGexf('mention'));
+  zip.file('metrik_aktor.csv',metricsCSV());
+  zip.file('BACA.txt',`SNA Explorer, diekspor ${new Date().toLocaleString('id-ID')}\nSumber: ${S.source}\nRentang: ${$('dFrom').value||'-'} s.d. ${$('dTo').value||'-'}\nResolusi Louvain: ${S.res}, seed 42\nNormalisasi (layout + Louvain): ${S.norm==='none'?'none (bobot mentah)':'association strength'}. Atribut weight pada edge GEXF tetap jumlah interaksi mentah.\nBetweenness: tidak berbobot, dinormalisasi. PageRank: berbobot, alpha 0.85.\nLayout: ${S.alg==='vos'?'VOS mapping':'ForceAtlas2'}. Posisi node mengikuti layout di aplikasi untuk node yang tampil; node lain diberi posisi acak. Jalankan ForceAtlas2 di Gephi untuk layout penuh.\n`);
+  const blob=await zip.generateAsync({type:'blob'});
+  saveFile(`sna_gexf_${stamp()}.zip`, blob);
+};
+$('btnCsv').onclick=()=>{ if(!S.summary){ status('Muat data terlebih dahulu.','warn'); return; } saveFile(`sna_metrik_${stamp()}.csv`, '﻿'+metricsCSV()); };
+$('btnTemplate').onclick=()=>saveFile('contoh_sna.csv', sampleCSV());
+$('btnCopy').onclick=async()=>{
+  if(!S.summary){ status('Muat data terlebih dahulu.','warn'); return; }
+  try{ await navigator.clipboard.writeText(toGexf(S.net)); status(`GEXF jaringan ${S.net} disalin. Tempel ke editor teks lalu simpan sebagai <b>${S.net}.gexf</b>.`); }
+  catch(e){ status('Clipboard ditolak oleh browser. Gunakan tombol Ekspor GEXF.','err'); }
+};
+
+/* ---------- capability ---------- */
+if(window.claude && typeof window.claude.use==='function'){
+  window.claude.use('downloads').then(d=>{ S.dl=d; }).catch(()=>{});
+}
+
+/* ---------- start ---------- */
+if(!L||!G||!window.Papa||!window.JSZip){ status('Pustaka gagal dimuat. Muat ulang halaman.','err'); return; }
+$('fPlat').onchange=e=>{ S.fPlat=e.target.value; rebuild(); };
+$('fParty').onchange=e=>{ S.fParty=e.target.value; rebuild(); };
+// Dataset bawaan: bila artifact memuat data/default.csv, pakai itu; bila tidak ada, pakai contoh sintetis.
+fetch('data/default.csv',{cache:'no-store'}).then(r=>r.ok?r.text():Promise.reject(r.status))
+  .then(t=>ingest(t,'Data penelitian (default.csv)'))
+  .catch(()=>ingest(sampleCSV(),'Contoh data sintetis (akun fiktif)'));
+})();
+</script>
+</body>
+</html>

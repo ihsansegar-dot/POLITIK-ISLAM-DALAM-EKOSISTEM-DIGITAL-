@@ -1,0 +1,65 @@
+# Konfigurasi pengumpulan data: Politik Islam dalam Ekosistem Digital (PKS, PKB, PPP, PAN)
+# status akun: verified  = terkonfirmasi dari >=1 sumber independen + profil ScrapeCreators
+#              candidate = ditemukan tetapi belum dikonfirmasi; WAJIB dicek manual sebelum collect
+#              unknown   = belum ada; isi handle setelah verifikasi manual
+# Hanya akun berstatus "verified" yang dikumpulkan oleh perintah `collect`.
+
+project: politik-islam-digital-2029
+# Ekspor teks komentar ke sna_explorer.csv (keputusan peneliti 1 Nov 2026: disertakan).
+# Akun warga tetap dipseudonimkan, tetapi teks bisa dilacak balik lewat mesin pencari: jangan bagikan publik.
+sna_export_text: true
+period:
+  since: "2026-01-01"      # batas bawah tanggal konten
+  until: "2026-12-31"      # batas atas; ubah per gelombang longitudinal (2026-27, 2028, 2029)
+
+budget:
+  max_credits_per_run: 150 # run pertama: ukur biaya nyata
+  max_posts_per_account: 5
+  max_comment_pages_per_post: 1
+  fetch_replies: false     # IG: include_replies = 15 kredit/halaman; YouTube/TikTok: panggilan tambahan per thread
+
+seeds:
+  PKS:
+    x:         {handle: PKSejahtera,     status: verified,  note: "DPP PKS; verified; 483k followers (pilot 2026-11-01); dirujuk Netray 2024; ditautkan dari pks.id"}
+    instagram: {handle: pk_sejahtera,    status: verified,  note: "dirujuk beberapa artikel jurnal; owner id 690269097"}
+    tiktok:    {handle: pksejahtera,     status: verified,  note: "nickname 'Partai Keadilan Sejahtera', 114.206 pengikut; ditautkan dari pks.id (cek 2026-11-01)"}
+    youtube:   {handle: pkstvindonesia,  status: verified,  note: "PKSTV, channelId UCToDQGTa-S1hbnfXu47eULA, badge Verified, ~300 rb subscriber; pks.id menautkan youtube.com/PKSTVIndonesia (URL lama, nama sama)"}
+    # telegram (data tambahan, protokol V.E): telegram.me/PK_Sejahtera -> ditautkan dari pks.id; belum didukung pipeline
+  PKB:
+    x:         {handle: DPP_PKB,  status: verified, note: "Partai Kebangkitan Bangsa; centang verifikasi; 164.539 pengikut; ditautkan dari pkb.id (cek 2026-11-01)"}
+    instagram: {handle: dpp_pkb,  status: verified, note: "ditautkan dari pkb.id dan dari kanal YouTube resmi; profil belum dicek via API"}
+    tiktok:    {handle: dpp_pkb,  status: verified, note: "bio 'Akun resmi DPP PKB'; verified; 115.767 pengikut; ditautkan dari pkb.id"}
+    youtube:   {handle: dpp_pkb,  status: verified, note: "DPP PKB, channelId UCnErJvRtHAS2y0EjAIClP4Q; verified; 41,7 rb subscriber; ditautkan dari pkb.id"}
+  PPP:
+    x:         {handle: DPP_PPP,  status: verified, note: "bio 'Twitter Resmi Partai Persatuan Pembangunan'; identity verified; 50.744 pengikut; tautan ppp.or.id"}
+    instagram: {handle: dpp.ppp,  status: verified, note: "diberikan peneliti; profil belum dicek via API; ppp.or.id tidak bisa diakses dari sesi ini"}
+    tiktok:    {handle: dpp.ppp,  status: verified, note: "bio 'Official DPP PPP'; TANPA badge verifikasi; 86.620 pengikut; diberikan peneliti"}
+    youtube:   {handle: petigatv346, status: verified, note: "Petiga TV, channelId UC5Y2Be3lI78Y7lwajocg9og; TANPA badge; deskripsi: kanal resmi DPP PPP dikelola tim Kaukus Muda PPP"}
+  PAN:
+    x:         {handle: Official_PAN,   status: verified, note: "bio 'Twitter Resmi DPP Partai Amanat Nasional'; TANPA badge; 77.223 pengikut; tautan pan.or.id; ditautkan dari kanal PAN TV"}
+    instagram: {handle: amanatnasional, status: verified, note: "ditautkan dari kanal PAN TV; disebut IG resmi PAN di skripsi UIN SGD 2025; profil belum dicek via API"}
+    tiktok:    {handle: amanat_nasional, status: verified, note: "bercentang verifikasi, akun organisasi; 1.020.533 pengikut (~9x partai lain); diberikan peneliti"}
+    youtube:   {handle: pantv12,        status: verified, note: "PAN TV, channelId UCVRhJ_WG2eKquYNFStXOOmg; TANPA badge; 'Kanal Youtube Resmi DPP PAN, dikelola Media Center PAN'"}
+
+# Path endpoint ScrapeCreators. Base URL dan header x-api-key terkonfirmasi dari tutorial resmi.
+# Path bertanda (cek) belum diverifikasi; bila 404, cocokkan dengan docs.scrapecreators.com.
+api:
+  base_url: https://api.scrapecreators.com
+  endpoints:
+    x_profile:            /v1/twitter/profile             # (cek)
+    x_user_tweets:        /v1/twitter/user-tweets         # (cek)
+    ig_user_posts:        /v2/instagram/user/posts        # terkonfirmasi di deskripsi endpoint
+    ig_post_comments:     /v2/instagram/post/comments     # (cek)
+    tt_profile:           /v1/tiktok/profile              # terkonfirmasi di deskripsi endpoint
+    tt_profile_videos:    /v3/tiktok/profile/videos       # (cek)
+    tt_video_comments:    /v1/tiktok/video/comments       # (cek)
+    yt_channel:           /v1/youtube/channel             # (cek)
+    yt_channel_videos:    /v1/youtube/channel-videos      # (cek)
+    yt_video_comments:    /v1/youtube/video/comments      # terkonfirmasi di tutorial resmi
+    yt_comment_replies:   /v1/youtube/video/comment/replies  # (cek)
+
+# Tokoh publik/elite yang namanya boleh dipertahankan dalam dataset (bukan di-hash).
+# Isi hanya untuk pejabat/elite partai dengan peran publik terverifikasi, sesuai keputusan etik penelitian.
+# Semua akun lain otomatis dipseudonimkan (HMAC-SHA256 + ANON_SALT).
+public_figures: []
+#  - {platform: instagram, handle: almuzzammil.yusuf, role: "Presiden PKS 2025-2030 (bio terverifikasi IG)"}
