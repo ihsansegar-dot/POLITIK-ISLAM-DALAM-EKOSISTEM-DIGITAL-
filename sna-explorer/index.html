@@ -149,6 +149,10 @@ canvas#g.hovering{cursor:pointer}
 .muted{color:var(--muted)}
 .tables{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .senti{margin-top:14px;display:grid;gap:10px}
+.sentbox .seg button{font-size:12px;padding-left:2px;padding-right:2px}
+#segFSent button[data-k=positif][aria-pressed=true]{background:#0f8b8d;border-color:#0f8b8d;color:#fff}
+#segFSent button[data-k=netral][aria-pressed=true]{background:#9aa1ab;border-color:#9aa1ab;color:#fff}
+#segFSent button[data-k=negatif][aria-pressed=true]{background:#c2410c;border-color:#c2410c;color:#fff}
 .senti-head{display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap}
 .senti-head h2{font:600 12px/1 var(--f-display);text-transform:uppercase;letter-spacing:.9px;color:var(--muted);margin:0 0 6px}
 .senti-grid{display:grid;grid-template-columns:260px minmax(0,1fr) minmax(0,1.5fr);gap:12px}
@@ -300,6 +304,24 @@ tr.sel td{background:var(--accent-soft)}
         <ol class="entlist" id="entList"></ol>
         <span class="small">Klik entitas untuk memfilter graf, tabel, dan peta ke interaksi yang menyebutnya. Ekstraksi berbasis kamus dan pola, bukan model NER; cek manual sebelum dikutip.</span>
       </div>
+      <div class="grp sentbox" id="sentBox" hidden>
+        <span class="lbl">Sentimen</span>
+        <div class="seg" id="segSent" style="grid-template-columns:repeat(3,1fr)" role="group" aria-label="Model sentimen">
+          <button type="button" data-m="main" aria-pressed="true" title="mdhugol/indonesia-bert-sentiment-classification">IndoBERT</button>
+          <button type="button" data-m="alt" aria-pressed="false" title="w11wo/indonesian-roberta-base-sentiment-classifier">RoBERTa</button>
+          <button type="button" data-m="agree" aria-pressed="false" title="Hanya teks yang dilabel sama oleh kedua model">Sepakat</button>
+        </div>
+        <div class="seg" id="segFSent" style="grid-template-columns:repeat(4,1fr)" role="group" aria-label="Filter sentimen">
+          <button type="button" data-k="" aria-pressed="true">Semua</button>
+          <button type="button" data-k="positif" aria-pressed="false">Positif</button>
+          <button type="button" data-k="netral" aria-pressed="false">Netral</button>
+          <button type="button" data-k="negatif" aria-pressed="false">Negatif</button>
+        </div>
+        <label for="sMin">Keyakinan minimum <output id="oSMin">0%</output></label>
+        <input type="range" id="sMin" min="0" max="0.95" step="0.05" value="0">
+        <label class="chk"><input type="checkbox" id="showSent" checked> Tampilkan panel sentimen</label>
+        <span class="small" id="sentNote">Filter sentimen berlaku untuk graf, tabel, peta, dan entitas. Label di bawah ambang keyakinan dianggap tak berlabel. Mode Sepakat memakai skor terendah dari kedua model.</span>
+      </div>
       <label class="chk" id="realWrap" style="display:none"><input type="checkbox" id="showReal" checked> Tampilkan nama akun asli (matikan untuk tangkapan layar publikasi)</label>
       <label class="chk"><input type="checkbox" id="selfLoop" checked> Abaikan self-loop (aktor me-retweet/membalas dirinya)</label>
       <div class="grp">
@@ -363,11 +385,7 @@ tr.sel td{background:var(--accent-soft)}
     <div class="senti-head">
       <div><h2>Sentimen</h2>
         <p class="desc" id="sentiDesc">Positif / netral / negatif per teks, mengikuti filter platform, partai, tanggal, dan entitas.</p></div>
-      <div class="seg" id="segSent" style="grid-template-columns:repeat(3,auto)" role="group" aria-label="Model sentimen">
-        <button type="button" data-m="main" aria-pressed="true">IndoBERT</button>
-        <button type="button" data-m="alt" aria-pressed="false">RoBERTa</button>
-        <button type="button" data-m="agree" aria-pressed="false">Hanya yang sepakat</button>
-      </div>
+      <span class="small muted" id="sentMode"></span>
     </div>
     <div class="senti-grid">
       <div class="card senti-pie"><svg id="sentPie" viewBox="0 0 220 220" role="img" aria-label="Pie chart sentimen"></svg><div class="senti-leg" id="sentLeg"></div></div>
@@ -544,9 +562,10 @@ function fillFilter(id, vals){
   el.innerHTML='<option value="">Semua</option>'+u.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
   el.closest('.grp').style.display=u.length?'':'none';
 }
-function filteredRows(){
+function filteredRows(noSent){
   return S.rows.filter(r=>{
     if(S.fPlat && r.plat!==S.fPlat) return false;
+    if(!noSent && S.fSent && sentOf(r)!==S.fSent) return false;
     if(S.fParty && r.party!==S.fParty) return false;
     if(S.ent && S.ent.val && !entMatch(r)) return false;
     if(S.dFrom==null && S.dTo==null) return true;
@@ -793,6 +812,7 @@ function draw(){
     ctx.fillStyle=cssVar('--muted'); ctx.font='14px '+cssVar('--f-body'); ctx.textAlign='center';
     ctx.fillText(net&&net.g.order===0?`Tidak ada interaksi ${S.net} pada data/rentang ini.`:'Unggah CSV atau muat contoh data.', W/2, H/2); return;
   }
+  if(lay.nodes.some(n=>!net.M[n])) return;  // tata letak lama milik jaringan sebelum filter berubah; tunggu doLayout
   const t=S.transform, sk=Math.max(0.55,Math.sqrt(t.k));
   const maxPr=Math.max(...lay.nodes.map(n=>net.M[n].pr))||1;
   const focus=S.selected||S.hover;
@@ -859,6 +879,7 @@ function draw(){
 
 function pick(mx,my){
   const lay=S.layout, net=S.nets[S.net]; if(!lay||lay.net!==S.net) return null;
+  if(lay.nodes.some(n=>!net.M[n])) return;  // tata letak lama milik jaringan sebelum filter berubah; tunggu doLayout
   const t=S.transform, sk=Math.max(0.55,Math.sqrt(t.k)); const maxPr=Math.max(...lay.nodes.map(n=>net.M[n].pr))||1;
   let best=null, bd=Infinity;
   for(const n of lay.nodes){ const p=lay.pos.get(n); const x=t.applyX(p.x), y=t.applyY(p.y); const r=nodeRadius(net,n,maxPr)*sk+3; const d=Math.hypot(mx-x,my-y); if(d<r && d<bd){bd=d;best=n;} }
@@ -1134,11 +1155,16 @@ let CONTENT=[]; const GEO={tab:'lok', sel:null, selKind:null, recs:[], focus:nul
 const SENT=[['positif','Positif','#0f8b8d'],['netral','Netral','#9aa1ab'],['negatif','Negatif','#c2410c']];
 const SENTC=Object.fromEntries(SENT.map(x=>[x[0],x[2]]));
 const SST={m:'main', sel:null, party:null};
-function sentOf(r){ if(SST.m==='alt') return r.sAlt; if(SST.m==='agree') return (r.sent&&r.sent===r.sAlt)?r.sent:''; return r.sent; }
+S.fSent=''; S.sMin=0;
+function sentScore(r){ return SST.m==='alt'?r.sAltScore:SST.m==='agree'?Math.min(r.sScore,r.sAltScore):r.sScore; }
+function sentOf(r){ const k=SST.m==='alt'?r.sAlt:SST.m==='agree'?((r.sent&&r.sent===r.sAlt)?r.sent:''):r.sent; return (k&&sentScore(r)>=S.sMin)?k:''; }
 function renderSent(){
   const sec=$('senti'); if(!sec) return;
-  const all=filteredRows(); const has=all.some(r=>r.sent);
-  if(!S.rows.some(r=>r.sent)){ sec.hidden=true; return; } sec.hidden=false;
+  const hasData=S.rows.some(r=>r.sent); $('sentBox').hidden=!hasData;
+  if(!hasData||!$('showSent').checked){ sec.hidden=true; return; } sec.hidden=false;
+  const all=filteredRows(true);  // pie memakai filter lain, bukan filter sentimen itu sendiri
+  if(S.fSent && !SST.sel) SST.sel=S.fSent;
+  $('sentMode').textContent='Model: '+({main:'IndoBERT',alt:'RoBERTa',agree:'hanya yang sepakat'})[SST.m]+(S.sMin?` · keyakinan ≥ ${Math.round(S.sMin*100)}%`:'')+(S.fSent?` · filter global: ${S.fSent}`:'')+' (atur di sidebar)';
   // unit pie = teks unik per platform (judul berita yang menyebut 2 partai dihitung sekali)
   const seen=new Set(), items=[];
   for(const r of all){ const k=r.plat+'|'+(r.url&&r.plat==='media'?r.url:r.a+'|'+r.ts+'|'+r.text); if(seen.has(k)) continue; seen.add(k); items.push(r); }
@@ -1150,7 +1176,7 @@ function renderSent(){
     arr.forEach(r=>{ca[r.sent]=(ca[r.sent]||0)+1; cb[r.sAlt]=(cb[r.sAlt]||0)+1;}); const pe=SENT.reduce((t,[k])=>t+(ca[k]||0)*(cb[k]||0),0)/N/N; return pe<1?(po-pe)/(1-pe):0; };
   const kLbl=k=>k<0.2?'lemah':k<0.4?'cukup':k<0.6?'sedang':k<0.8?'kuat':'sangat kuat';
   const kapTxt=[...new Set(agree.map(r=>r.plat))].sort().map(pl=>{ const k=kappa(agree.filter(r=>r.plat===pl)); return `${pl} ${k.toFixed(2)} (${kLbl(k)})`; }).join(' · ');
-  $('sentiDesc').innerHTML=`${fmtInt(n)} teks berlabel${SST.m==='agree'?` dari ${fmtInt(nAll)} (hanya yang dilabel sama oleh kedua model)`:''} · kesepakatan IndoBERT–RoBERTa ${(ag*100).toFixed(1)}%, <b>κ Cohen ${kapTxt||'–'}</b>. `+
+  $('sentiDesc').innerHTML=`${fmtInt(n)} teks berlabel${n<nAll?` dari ${fmtInt(nAll)}${SST.m==='agree'?' (hanya yang dilabel sama oleh kedua model'+(S.sMin?' dan di atas ambang':'')+')':' (sisanya di bawah ambang keyakinan)'}`:''} · kesepakatan IndoBERT–RoBERTa ${(ag*100).toFixed(1)}%, <b>κ Cohen ${kapTxt||'–'}</b>. `+
     `Media: dinilai dari judul saja. Model dilatih pada ulasan/komentar (SmSA), bukan berita politik; label = nada teks, bukan sikap terhadap partai tertentu. Validasi manual sebelum dikutip.`;
   // pie
   const svg=d3.select('#sentPie'); svg.selectAll('*').remove();
@@ -1178,7 +1204,7 @@ function renderSent(){
       `<td class="num" title="(positif − negatif) / n">${n?(((c.positif||0)-(c.negatif||0))/n*100).toFixed(0):'–'}</td></tr>`).join('')+'</tbody>';
   $('sentTbl').querySelectorAll('td.c').forEach(td=>td.onclick=()=>{ const p=td.dataset.p==='Total'?null:td.dataset.p; const same=SST.sel===td.dataset.k&&SST.party===p; SST.sel=same?null:td.dataset.k; SST.party=same?null:p; renderSent(); });
   // contoh teks
-  const sc=r=>SST.m==='alt'?r.sAltScore:r.sScore;
+  const sc=sentScore;
   const ex=labd.filter(r=>(!SST.sel||sentOf(r)===SST.sel)&&(!SST.party||all.some(x=>x.party===SST.party&&(x===r||(x.url&&x.url===r.url&&x.plat==='media'))))).sort((a,b)=>sc(b)-sc(a)).slice(0,12);
   $('sentExH').textContent='Contoh teks'+(SST.sel?' · '+SST.sel:'')+(SST.party?' · '+SST.party:'');
   $('sentEx').innerHTML=`<thead><tr><th>Sentimen</th><th>Teks</th><th>Sumber</th><th class="num">Skor</th><th>Model lain</th></tr></thead><tbody>`+
@@ -1187,7 +1213,13 @@ function renderSent(){
         `<td>${esc(r.plat)} · ${esc(lab(r.a))}</td><td class="num">${(sc(r)*100).toFixed(0)}%</td><td>${o?`<span class="lbl" style="background:${SENTC[o]||'#888'}">${o}</span>`:'–'}</td></tr>`; }).join('')+
     (ex.length?'':'<tr><td colspan="5" class="muted">Tidak ada teks.</td></tr>')+'</tbody>';
 }
-$('segSent').querySelectorAll('button').forEach(b=>b.onclick=()=>{ SST.m=b.dataset.m; $('segSent').querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b)); renderSent(); });
+const sentGlobal=()=>{ if(S.fSent) rebuild(); else renderSent(); };  // model/ambang mengubah himpunan baris hanya bila filter aktif
+$('segSent').querySelectorAll('button').forEach(b=>b.onclick=()=>{ SST.m=b.dataset.m; $('segSent').querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b)); sentGlobal(); });
+$('segFSent').querySelectorAll('button').forEach(b=>b.onclick=()=>{ S.fSent=b.dataset.k; SST.sel=S.fSent||null; SST.party=null;
+  $('segFSent').querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b)); rebuild(); });
+$('sMin').oninput=e=>{ S.sMin=+e.target.value; $('oSMin').textContent=Math.round(S.sMin*100)+'%'; };
+$('sMin').onchange=()=>sentGlobal();
+$('showSent').onchange=()=>renderSent();
 // Media online: buang dateline ("JAKARTA, KOMPAS.com -", "Liputan6.com, Jakarta -", "Jakarta -") agar lokasi
 // redaksi tidak terhitung sebagai lokasi yang diberitakan.
 function stripDL(t){ const i=(t||'').indexOf(' — '); if(i<0) return t||''; let e=t.slice(i+3);
