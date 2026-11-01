@@ -461,7 +461,7 @@ def cmd_build(cfg, run_ids=None):
             sna_rows.append(dict(author=src, text=(text or "") if with_text else "",
                                  type="reply" if itype in ("comment", "reply") else itype, target_user=tgt,
                                  created_at=when.isoformat() if when else "", platform=platform,
-                                 party=state["party"], interaction=itype))
+                                 party=state["party"], interaction=itype, content_url=state.get("url", "")))
 
     def mentions(src, text, platform, when):
         for m in MENTION.findall(text or ""):
@@ -471,6 +471,7 @@ def cmd_build(cfg, run_ids=None):
         ep, meta, d, col = rec["endpoint"], rec["meta"], rec["response"], rec["collected_at"]
         party, platform = meta.get("party"), meta.get("platform")
         state["party"] = party or ""
+        state["url"] = meta.get("content_url", "")
         audit[f"responses:{ep}"] += 1
         if ep == "ig_user_posts":
             for i in d.get("items", []):
@@ -483,6 +484,7 @@ def cmd_build(cfg, run_ids=None):
                                              content_text="", content_url=i.get("url"), likes=i.get("like_count"), views=i.get("play_count"),
                                              comments_count=i.get("comment_count"), data_collection_date=col,
                                              seed_account=meta["seed"], owned_by_seed=(own.get("username") or "").lower() == meta["seed"].lower())
+                state["url"] = i.get("url")
                 mentions(aid, content[i.get("url")]["caption"], platform, when)
         elif ep == "tt_profile_videos":
             for v in d.get("aweme_list", []):
@@ -496,6 +498,7 @@ def cmd_build(cfg, run_ids=None):
                                     publication_date=when.isoformat() if when else "", caption=v.get("desc"), content_text="",
                                     content_url=url, likes=st.get("digg_count"), views=st.get("play_count"),
                                     comments_count=st.get("comment_count"), data_collection_date=col)
+                state["url"] = url
                 mentions(aid, v.get("desc"), platform, when)
         elif ep == "yt_channel_videos":
             for v in d.get("videos", []):
@@ -585,7 +588,7 @@ def cmd_build(cfg, run_ids=None):
     n4 = write("account_dataset.csv", accounts.values(), ["anonymous_account_id", "account_category", "institutional_or_individual", "party_affiliation_if_publicly_verified", "public_account_description", "platform"])
     # Ekspor untuk SNA Explorer: satu baris per interaksi (comment/reply -> 'reply'; mention dibiarkan sebagai 'mention')
     # satu baris per interaksi; teks komentar ikut bila sna_export_text: true (pengguna dipseudonimkan, teks tidak)
-    n5 = write("sna_explorer.csv", sna_rows, ["author", "text", "type", "target_user", "created_at", "platform", "party", "interaction"])
+    n5 = write("sna_explorer.csv", sna_rows, ["author", "text", "type", "target_user", "created_at", "platform", "party", "interaction", "content_url"])
 
     by_plat = Counter(r["platform"] for r in content.values())
     cm_plat = Counter(r["platform"] for r in comments.values())

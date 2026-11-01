@@ -95,6 +95,12 @@ canvas#g.hovering{cursor:pointer}
 .gcount{position:absolute;left:10px;top:8px;font-size:12px;color:var(--muted);font-family:var(--f-mono);pointer-events:none}
 .zoom{position:absolute;right:10px;top:8px;display:flex;flex-direction:column;gap:4px}
 .zoom button{width:30px;height:30px;border:1px solid var(--line);border-radius:6px;background:var(--panel);cursor:pointer;font-size:16px;line-height:1}
+.entlist{margin:0;padding:0;list-style:none;display:grid;gap:2px;max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:4px}
+.entlist button{all:unset;cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:6px;width:100%;box-sizing:border-box;font-size:12.5px;padding:2px 5px;border-radius:4px}
+.entlist button:hover,.entlist button[aria-pressed="true"]{background:var(--accent-soft)}
+.entlist .v{font-family:var(--f-mono);color:var(--muted)}
+.entchip{display:flex;justify-content:space-between;gap:6px;align-items:center;font-size:12.5px;background:var(--accent-soft);border-radius:6px;padding:4px 7px}
+.entchip button{border:0;background:none;cursor:pointer;color:var(--muted);font-size:14px}
 .geo svg{width:100%;height:auto;display:block;background:var(--bg);border-radius:8px}
 .geo .land{fill:var(--line);stroke:var(--panel);stroke-width:.4}
 .geo .bub{fill-opacity:.75;stroke:var(--panel);stroke-width:1;cursor:pointer}
@@ -262,6 +268,20 @@ tr.sel td{background:var(--accent-soft)}
         <label for="fParty">Partai (pemilik akun seed)</label>
         <select id="fParty"></select>
       </div>
+      <div class="grp ent" id="entBox">
+        <span class="lbl">Entitas &amp; narasi</span>
+        <select id="entKind" aria-label="Jenis entitas">
+          <option value="org">Organisasi</option><option value="lok">Lokasi (provinsi)</option><option value="tmp">Tempat</option>
+          <option value="prod">Produk / program</option><option value="term">Term</option><option value="tag">Hashtag</option>
+        </select>
+        <select id="entSrc" aria-label="Sumber teks">
+          <option value="all">Semua sumber (komentar, caption, akun)</option><option value="kom">Komentar saja</option><option value="cap">Caption konten saja</option>
+        </select>
+        <input type="search" id="entQ" placeholder="saring daftar…" aria-label="Saring daftar entitas">
+        <div id="entActive"></div>
+        <ol class="entlist" id="entList"></ol>
+        <span class="small">Klik entitas untuk memfilter graf, tabel, dan peta ke interaksi yang menyebutnya. Ekstraksi berbasis kamus dan pola, bukan model NER; cek manual sebelum dikutip.</span>
+      </div>
       <label class="chk" id="realWrap" style="display:none"><input type="checkbox" id="showReal" checked> Tampilkan nama akun asli (matikan untuk tangkapan layar publikasi)</label>
       <label class="chk"><input type="checkbox" id="selfLoop" checked> Abaikan self-loop (aktor me-retweet/membalas dirinya)</label>
       <div class="grp">
@@ -402,7 +422,7 @@ function ingest(text, sourceName){
     const targets = targetsRaw.map(x=>x.toLowerCase());
     targetsRaw.forEach((x,i)=>{ if(!displayName.has(targets[i])) displayName.set(targets[i], x); });
     const ts = r.created_at ? Date.parse(String(r.created_at).trim()) : NaN;
-    rows.push({a, t, targets, ts: isNaN(ts)?null:ts, plat:String(r.platform||'').trim().toLowerCase(), party:String(r.party||'').trim().toUpperCase(), text:String(r.text||'')});
+    rows.push({a, t, targets, ts: isNaN(ts)?null:ts, plat:String(r.platform||'').trim().toLowerCase(), url:String(r.content_url||'').trim(), party:String(r.party||'').trim().toUpperCase(), text:String(r.text||'')});
   }
   S.rows=rows; S.names=displayName;
   fillFilter('fPlat', rows.map(r=>r.plat)); fillFilter('fParty', rows.map(r=>r.party)); S.fPlat=''; S.fParty=''; S.source=sourceName; S.selected=null; S.focusComm=null;
@@ -492,6 +512,7 @@ function filteredRows(){
   return S.rows.filter(r=>{
     if(S.fPlat && r.plat!==S.fPlat) return false;
     if(S.fParty && r.party!==S.fParty) return false;
+    if(S.ent && S.ent.val && !entMatch(r)) return false;
     if(S.dFrom==null && S.dTo==null) return true;
     if(r.ts==null) return false;
     return (S.dFrom==null||r.ts>=S.dFrom) && (S.dTo==null||r.ts<=S.dTo);
@@ -531,7 +552,7 @@ function rebuild(){
 }
 
 function renderAll(relayout){
-  renderKpis(); renderComms(); renderTables(); renderInsight(); fillDatalist(); if(typeof buildGeo==='function') buildGeo();
+  renderKpis(); renderComms(); renderTables(); renderInsight(); fillDatalist(); if(typeof buildGeo==='function') buildGeo(); if(typeof renderEnt==='function') renderEnt();
   if(relayout) doLayout(); else draw();
 }
 
@@ -1133,11 +1154,77 @@ function geoSelect(kind,k){
 $('geoTabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{ GEO.tab=b.dataset.t; $('geoTabs').querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b)); renderGeoList(); });
 fetch('assets/indonesia.json').then(r=>r.ok?r.json():null).then(g=>{ GEO_SHAPE=g; if(S.summary) renderGeo(); }).catch(()=>{});
 
+
+/* ---------- entitas & narasi (kamus + pola, bukan NER statistik) ---------- */
+const ORGS = [
+ ['PKS','pks|partai keadilan sejahtera|pksejahtera|fpks|pk sejahtera'],['PKB','pkb|partai kebangkitan bangsa|fpkb'],
+ ['PPP','ppp|partai persatuan pembangunan|partai kabah'],['PAN','pan|partai amanat nasional|fraksi pan|bm pan|barisan muda pan|perempuan amanat nasional'],
+ ['Golkar','golkar'],['Gerindra','gerindra'],['PDI Perjuangan','pdip|pdi perjuangan|pdi p'],['NasDem','nasdem'],['Demokrat','demokrat|partai demokrat'],
+ ['PSI','psi|partai solidaritas indonesia'],['Perindo','perindo'],['Hanura','hanura'],
+ ['DPR','dpr|dpr ri|dewan perwakilan rakyat'],['DPRD','dprd|dprk'],['MPR','mpr|mpr ri'],['DPD (dewan)','dewan perwakilan daerah'],
+ ['KPU','kpu'],['Bawaslu','bawaslu'],['KPK','kpk'],['Polri','polri|polisi|polda|polres|kapolda|kapolri|polsek'],['TNI','tni'],
+ ['MUI','mui|majelis ulama indonesia'],['NU','nu|nahdlatul ulama|pbnu|nahdliyin|ansor|banser|muslimat nu|fatayat'],['Muhammadiyah','muhammadiyah|aisyiyah'],
+ ['Kementerian','kementerian|kemenag|kementan|kemensos|kemendikbud|kemenkes|kemendagri|kemenkeu'],['Pemerintah daerah','pemda|pemkab|pemkot|pemprov|bupati|walikota|wali kota|gubernur'],
+ ['Pesantren','ponpes|pesantren|pondok pesantren|santri'],['Komdigi','komdigi'],['Timnas','timnas'],['DPP/DPW/DPC/DPD partai','dpp|dpw|dpc'],
+];
+const PRODS = [
+ ['Bantu Rakyat','bantu rakyat|banturakyat'],['Lapor PAN','lapor pan'],['Pasar murah','pasar murah|pasar rakyat|pasarrakyatpetani'],['Sembako/bansos','sembako|bansos|bantuan sosial|blt'],
+ ['Makan Bergizi Gratis','makan bergizi gratis|mbg|makan siang gratis'],['Masker & air bersih','masker|air bersih'],['Beasiswa/KIP','beasiswa|kip|kip kuliah'],
+ ['BPJS','bpjs|kis'],['Pupuk/pertanian','pupuk|hari tani|haritani|petani'],['Green Party','greenparty|green party'],['Bimteknas','bimteknas'],
+ ['Pelayanan publik','pelayanan publik|pelayanan'],['UMKM','umkm'],['Disabilitas','disabilitas'],['Ketahanan keluarga','ketahanan keluarga'],['Ekonomi syariah','ekonomi syariah'],
+];
+function mkGaz(list){ const g=[]; for(const [lab,al] of list) for(const a of al.split('|')) g.push([a,lab]); g.sort((x,y)=>y[0].length-x[0].length); return g; }
+const G_ORG=mkGaz(ORGS), G_PROD=mkGaz(PRODS);
+const PROV_ABBR=new Set('jatim jateng jabar sulsel sumut sumbar sumsel kalbar kalteng kalsel kaltim kaltara sulut sulteng sultra sulbar malut babel kepri ntb ntt diy dki pbd pabardaya papua maluku riau jambi bengkulu lampung banten bali aceh gorontalo'.split(' '));
+const G_TMP=[]; for(const [p,[la,lo,al]] of Object.entries(PROV)) for(const a of al.split('|')){ if(a===p.toLowerCase()||PROV_ABBR.has(a)||a==='sul sel'||a.startsWith(p.toLowerCase().split(' ')[0]+' ')&&a.split(' ').length>1&&p.toLowerCase().startsWith(a)) continue; G_TMP.push([a,(a.length<=3?a.toUpperCase():a.replace(/\b\w/g,c=>c.toUpperCase()))+' ('+p+')']); }
+G_TMP.sort((x,y)=>y[0].length-x[0].length);
+const TMP_RE=/\b(?:kec(?:amatan)?\.?|desa|kelurahan|kampung|pondok pesantren|ponpes|pesantren|masjid|universitas|kabupaten|kab\.|kota)\s+([A-Z][\w'’]+(?:\s[A-Z][\w'’]+){0,2})/g;
+const STOP=new Set(('yang dan di ke dari ini itu untuk dengan pada adalah juga atau tidak tdk gak ga nggak kami kita saya aku sy kamu anda dia mereka akan sudah udah telah bisa bs ada jadi kalau kalo karena krn tapi namun lagi lg sih aja saja ya yg dgn utk dr dlm dalam oleh sebagai agar supaya semoga mg smg biar para pak bu ibu bapak mas mbak kak dek nak om tante the and to of in a is for semua banyak lebih paling sangat sekali hanya cuma masih belum harus mau ingin buat bikin sama seperti kayak kok dong deh nih tuh lah pun kah per tiap setiap terus trus mari ayo yuk hari ini tahun bulan sekarang nanti dulu baru lama baik bagus mantap mantab keren top jos yes ok oke amin aamiin aamiin aamin allah swt insyaallah insya masyaallah alhamdulillah bismillah barakallah innalillahi wa inna ilaihi rojiun rajiun innalilahi inalillahi salam assalamualaikum waalaikumsalam sehat selalu terima kasih makasih terimakasih bang gus kh ustadz ust serta hingga kepada menjadi tentang sampai seluruh bagi berupa bersama cukup akan oleh antara kembali melalui terhadap memberikan dapat tersebut setelah sebelum ketika selama tanpa sedang hanya pula lain beberapa berbagai bahwa sejak hal agar bukan tetapi karena maka nya'.split(' ')));
+function gazFind(txt,G){ let t=norm(txt); const out=new Set(); for(const [a,l] of G){ const k=' '+a+' '; if(t.includes(k)){ out.add(l); t=t.split(k).join(' '); } } return out; }
+function extract(txt, withTerms){
+  const t=String(txt||''); const E={org:gazFind(t,G_ORG),lok:new Set(findProv(t)),tmp:gazFind(t,G_TMP),prod:gazFind(t,G_PROD),term:new Set(),tag:new Set()};
+  for(const m of t.matchAll(TMP_RE)) E.tmp.add(m[0].replace(/\s+/g,' ').trim());
+  for(const m of t.matchAll(TAG)) E.tag.add('#'+m[1].toLowerCase());
+  if(withTerms) norm(t.replace(TAG,' ').replace(/@[\w.]+/g,' ')).split(' ').forEach(w=>{ if(w.length>=4 && !/^\d+$/.test(w) && !STOP.has(w)) E.term.add(w); });
+  return E;
+}
+let CMAP=new Map(); const ECACHE=new Map();
+function entsOf(r){
+  let e=ECACHE.get(r); if(e) return e;
+  const info=REAL.get(r.a)||{};
+  e={kom: r.t==='mention'? extract('',true) : extract(r.text,true), cap: extract(CMAP.get(r.url)||'',true), akun: extract((info.handle||'').replace(/[_.]/g,' ')+' '+(info.nickname||''),false)};
+  ECACHE.set(r,e); return e;
+}
+function entSets(r,kind,src){ const e=entsOf(r); const out=new Set();
+  if(src!=='cap') e.kom[kind].forEach(x=>out.add(x));
+  if(src!=='kom') e.cap[kind].forEach(x=>out.add(x));
+  if(src==='all' && kind!=='term' && kind!=='tag') e.akun[kind].forEach(x=>out.add(x));
+  return out; }
+function entMatch(r){ return entSets(r,S.ent.kind,S.ent.src).has(S.ent.val); }
+S.ent={kind:'org',src:'all',val:null};
+function renderEnt(){
+  const keep=S.ent.val; S.ent.val=null; const rows=filteredRows(); S.ent.val=keep;
+  const cnt=new Map(); rows.forEach(r=>entSets(r,S.ent.kind,S.ent.src).forEach(x=>cnt.set(x,(cnt.get(x)||0)+1)));
+  const q=$('entQ').value.trim().toLowerCase();
+  let items=[...cnt].filter(([k])=>!q||k.toLowerCase().includes(q)).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,40);
+  $('entList').innerHTML=items.length? items.map(([k,n])=>`<li><button type="button" data-k="${esc(k)}" aria-pressed="${S.ent.val===k}"><span>${esc(k)}</span><span class="v">${fmtInt(n)}</span></button></li>`).join('') : '<li class="small" style="padding:4px">Tidak ada entitas jenis ini pada filter aktif.</li>';
+  $('entList').querySelectorAll('button').forEach(b=>b.onclick=()=>{ S.ent.val = S.ent.val===b.dataset.k? null : b.dataset.k; renderEntActive(); rebuild(); });
+  renderEntActive();
+}
+function renderEntActive(){
+  const lbl={org:'Organisasi',lok:'Lokasi',tmp:'Tempat',prod:'Produk/program',term:'Term',tag:'Hashtag'}[S.ent.kind];
+  $('entActive').innerHTML = S.ent.val? `<div class="entchip"><span>${lbl}: <b>${esc(S.ent.val)}</b></span><button type="button" id="entClear" aria-label="Hapus filter entitas">✕</button></div>` : '';
+  const c=$('entClear'); if(c) c.onclick=()=>{ S.ent.val=null; rebuild(); };
+}
+$('entKind').onchange=e=>{ S.ent.kind=e.target.value; const had=S.ent.val; S.ent.val=null; if(had) rebuild(); else renderEnt(); };
+$('entSrc').onchange=e=>{ S.ent.src=e.target.value; const had=S.ent.val; S.ent.val=null; if(had) rebuild(); else renderEnt(); };
+$('entQ').oninput=()=>renderEnt();
+
 $('showReal').onchange=e=>{ SHOW_REAL=e.target.checked; hidePop(); rebuild(); };
 fetch('data/names.csv',{cache:'no-store'}).then(r=>r.ok?r.text():'').catch(()=>'').then(t=>{
   if(t){ Papa.parse(t,{header:true,skipEmptyLines:true}).data.forEach(r=>{ if(!r.id) return; const id=r.id.toLowerCase(); REAL.set(id,r); if(r.handle) REAL_BY_HANDLE.set(r.handle.toLowerCase(),id); });
          if(REAL.size) $('realWrap').style.display=''; }
-  return fetch('data/content.csv',{cache:'no-store'}).then(r=>r.ok?r.text():'').catch(()=>'').then(c=>{ if(c) CONTENT=Papa.parse(c,{header:true,skipEmptyLines:true}).data; return fetch('data/default.csv',{cache:'no-store'}); });
+  return fetch('data/content.csv',{cache:'no-store'}).then(r=>r.ok?r.text():'').catch(()=>'').then(c=>{ if(c){ CONTENT=Papa.parse(c,{header:true,skipEmptyLines:true}).data; CONTENT.forEach(x=>CMAP.set(x.content_url,x.caption||'')); } return fetch('data/default.csv',{cache:'no-store'}); });
 }).then(r=>r.ok?r.text():Promise.reject(r.status))
   .then(t=>ingest(t,'Data penelitian (default.csv)'))
   .catch(()=>ingest(sampleCSV(),'Contoh data sintetis (akun fiktif)'));
