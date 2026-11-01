@@ -120,3 +120,21 @@ def test_monthly_sampling(tmp_path, monkeypatch):
     assert json.loads((tmp_path / "state.json").read_text())["sample"]["PKS|instagram"] == ig
     assert "ig_post_comments" not in fc2.calls
     assert "x_user_tweets" not in fc.calls
+
+
+def test_monthly_with_x_and_private_names(tmp_path, monkeypatch):
+    cfg = setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(sp, "STATE", tmp_path / "state.json")
+    cfg["period"] = {"since": "2024-01-01", "until": "2026-11-30"}
+    cfg["sampling"] = {"platforms": ["instagram", "youtube", "x"], "posts_per_month": 2, "min_comments": 1,
+                       "seed": 2029, "max_credits_per_account": 50, "max_feed_pages": 2, "workers": 2}
+    fc = sp_fc = FakeClient(cfg, "m"); sp.cmd_collect_monthly(cfg, client=fc)
+    assert fc.calls.count("x_user_tweets") == 4 and "tt_profile_videos" not in fc.calls
+    fc2 = FakeClient(cfg, "m"); sp.cmd_collect_monthly(cfg, client=fc2)
+    assert "x_user_tweets" not in fc2.calls                     # X tidak diambil ulang
+    sp.cmd_build(cfg)
+    rows = read(tmp_path / "out" / "sna_explorer.csv")
+    assert {r["platform"] for r in rows} >= {"x", "instagram"}
+    names = read(tmp_path / "private" / "names_private.csv")
+    assert names and all(n["id"].startswith(("u_", "PKS_", "PKB_", "PPP_", "PAN_")) or ":" in n["id"] for n in names)
+    assert not any(n["handle"].startswith("u_") for n in names)  # isinya handle asli, bukan pseudonim

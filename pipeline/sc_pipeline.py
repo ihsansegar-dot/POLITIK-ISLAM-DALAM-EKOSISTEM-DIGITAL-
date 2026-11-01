@@ -306,7 +306,21 @@ def cmd_collect_monthly(cfg, client=None):
     accounts = [(party, pl, s["handle"]) for party, ps in cfg["seeds"].items() for pl, s in ps.items()
                 if pl in plats and s.get("status") == "verified" and s.get("handle")]
     spent = state.setdefault("spent", {})
+    x_done = set(state.setdefault("x_done", []))
     try:
+        # X: endpoint hanya memberi ~100 tweet populer per akun (bukan kronologis, tanpa balasan publik);
+        # cukup satu panggilan per akun, tidak ikut sampel bulanan.
+        for party, pl, h in [a for a in accounts if a[1] == "x"]:
+            key = f"{party}|x"
+            if key in x_done: continue
+            before = c.credits
+            d = c.get("x_user_tweets", {"handle": h, "trim": "true"}, {"party": party, "platform": "x", "seed": h})
+            spent[key] = spent.get(key, 0) + (c.credits - before)
+            if d is not None:
+                x_done.add(key); state["x_done"] = sorted(x_done)
+            save_state(state)
+            print(f"[x] {key} @{h}: {len((d or {}).get('tweets') or [])} tweet", flush=True)
+        accounts = [a for a in accounts if a[1] != "x"]
         for party, pl, h in accounts:
             key = f"{party}|{pl}"
             before = c.credits
@@ -444,8 +458,12 @@ def cmd_build(cfg, run_ids=None):
     audit = Counter()
     unknown_struct = Counter()
 
+    names = {}  # PRIVAT: id pseudonim -> handle asli, hanya untuk dashboard pribadi peneliti
+
     def acct(platform, uid, handle, party=None, category="public_user"):
         aid = anon(platform, uid, handle)
+        if handle and aid not in names:
+            names[aid] = (platform, str(handle).lstrip("@"))
         if aid not in accounts:
             official = aid.endswith("_official")
             public = ":" in aid
@@ -585,6 +603,15 @@ def cmd_build(cfg, run_ids=None):
     n2 = write("comment_dataset.csv", comments.values(), ["comment_id", "content_id", "anonymous_user_id", "comment_text", "comment_date", "reply_to", "likes_count", "sentiment_label", "sentiment_score", "aspect_category", "topic_category", "platform", "date_precision"])
     net_rows = [dict(source_id=s, target_id=t, platform=p, interaction_type=it, interaction_date=a["first"], interaction_date_last=a["last"], interaction_weight=a["weight"]) for (s, t, p, it), a in agg.items()]
     n3 = write("network_dataset.csv", net_rows, ["source_id", "target_id", "platform", "interaction_type", "interaction_date", "interaction_date_last", "interaction_weight"])
+    PROFILE = {"x": "https://x.com/{}", "instagram": "https://www.instagram.com/{}", "tiktok": "https://www.tiktok.com/@{}",
+               "youtube": "https://www.youtube.com/{}"}
+    priv = OUT.parent / "private"; priv.mkdir(parents=True, exist_ok=True)
+    with (priv / "names_private.csv").open("w", newline="", encoding="utf-8-sig") as f:
+        wr = csv.writer(f); wr.writerow(["id", "handle", "nickname", "verified_reason", "profile_url"])
+        for aid, (pl, h) in sorted(names.items()):
+            yt = h if (h.startswith("UC") and len(h) == 24) else None
+            url = (f"https://www.youtube.com/channel/{h}" if yt else PROFILE.get(pl, "{}").format(("@" + h) if pl == "youtube" else h))
+            wr.writerow([aid, h, h, "institution account" if aid.endswith("_official") else "", url])
     n4 = write("account_dataset.csv", accounts.values(), ["anonymous_account_id", "account_category", "institutional_or_individual", "party_affiliation_if_publicly_verified", "public_account_description", "platform"])
     # Ekspor untuk SNA Explorer: satu baris per interaksi (comment/reply -> 'reply'; mention dibiarkan sebagai 'mention')
     # satu baris per interaksi; teks komentar ikut bila sna_export_text: true (pengguna dipseudonimkan, teks tidak)

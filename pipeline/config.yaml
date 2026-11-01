@@ -15,7 +15,7 @@ period:
 # Sampel bulanan (perintah: collect-monthly). Keputusan peneliti 2 Nov 2026:
 # 5 post/akun/bulan, acak berbenih, hanya post dengan >=1 komentar; X ditunda (endpoint tidak memberi reply/repost).
 sampling:
-  platforms: [instagram, tiktok, youtube]
+  platforms: [instagram, youtube, x]   # 2 Nov 2026: IG, YouTube, X (TikTok sudah ada sampel 1 Nov)
   posts_per_month: 5
   min_comments: 1
   seed: 2029
