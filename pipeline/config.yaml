@@ -9,13 +9,24 @@ project: politik-islam-digital-2029
 # Akun warga tetap dipseudonimkan, tetapi teks bisa dilacak balik lewat mesin pencari: jangan bagikan publik.
 sna_export_text: true
 period:
-  since: "2026-01-01"      # batas bawah tanggal konten
-  until: "2026-12-31"      # batas atas; ubah per gelombang longitudinal (2026-27, 2028, 2029)
+  since: "2024-01-01"      # batas bawah tanggal konten (keputusan peneliti 2 Nov 2026)
+  until: "2026-11-30"      # batas atas; ubah per gelombang longitudinal
+
+# Sampel bulanan (perintah: collect-monthly). Keputusan peneliti 2 Nov 2026:
+# 5 post/akun/bulan, acak berbenih, hanya post dengan >=1 komentar; X ditunda (endpoint tidak memberi reply/repost).
+sampling:
+  platforms: [instagram, tiktok, youtube]
+  posts_per_month: 5
+  min_comments: 1
+  seed: 2029
+  max_credits_per_account: 400   # 12 akun x 400 = 4.800 kredit maksimum
+  max_feed_pages: 400
+  workers: 6
 
 budget:
-  max_credits_per_run: 150 # run pertama: ukur biaya nyata
-  max_posts_per_account: 5
-  max_comment_pages_per_post: 1
+  max_credits_per_run: 4800 # batas keseluruhan run sampel bulanan
+  max_posts_per_account: 60
+  max_comment_pages_per_post: 5
   fetch_replies: false     # IG: include_replies = 15 kredit/halaman; YouTube/TikTok: panggilan tambahan per thread
 
 seeds:

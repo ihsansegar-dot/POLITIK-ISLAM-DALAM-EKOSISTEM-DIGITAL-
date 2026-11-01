@@ -43,6 +43,7 @@ class Client:
         self.credits = 0
         self.max = cfg["budget"]["max_credits_per_run"]
         self.n = 0
+        import threading; self.lock = threading.Lock()
 
     def get(self, key, params, meta):
         if self.credits >= self.max:
@@ -60,7 +61,8 @@ class Client:
             except Exception as e:  # jaringan/JSON
                 err = repr(e); time.sleep(2 ** attempt * 3)
         charged = (data or {}).get("credits_charged", 0) or 0
-        self.credits += charged
+        with self.lock:
+            self.credits += charged
         ok = bool(data) and data.get("success", status == 200) and status in (200, 403, 404)
         if data is not None and not ok and not err:
             err = str(data.get("message") or data.get("error") or f"HTTP {status}")
@@ -72,13 +74,15 @@ class Client:
         return data if ok and not data.get("errorStatus") else None
 
     def _save(self, key, params, meta, data):
-        self.n += 1
+        with self.lock:
+            self.n += 1; n = self.n
         d = RAW / self.run_id / meta["platform"]
         d.mkdir(parents=True, exist_ok=True)
         rec = {"endpoint": key, "params": params, "meta": meta, "collected_at": NOW(), "response": data}
-        (d / f"{self.n:05d}_{key}.json").write_text(json.dumps(rec, ensure_ascii=False))
+        (d / f"{n:06d}_{key}.json").write_text(json.dumps(rec, ensure_ascii=False))
 
     def _log(self, key, params, meta, status, credits, err):
+      with self.lock:
         new = not LOG.exists()
         LOG.parent.mkdir(parents=True, exist_ok=True)
         with LOG.open("a", newline="", encoding="utf-8") as f:
@@ -206,6 +210,144 @@ def collect_account(c, cfg, party, platform, handle):
     elif platform == "x":
         # Catatan audit: endpoint ini hanya memberi ~100 tweet POPULER (bukan kronologis) dan tanpa balasan.
         c.get("x_user_tweets", {"handle": handle, "trim": "true"}, meta)
+
+
+# ----------------------------------------------------------------------------- sampel bulanan
+LIST_EP = {"instagram": "ig_user_posts", "tiktok": "tt_profile_videos", "youtube": "yt_channel_videos"}
+
+
+def _list_items(platform, d, handle):
+    """-> list of (url, datetime, comment_count) dari satu halaman feed."""
+    out = []
+    if platform == "instagram":
+        for i in d.get("items", []):
+            out.append((i.get("url"), parse_date(i.get("created_at")), i.get("comment_count") or 0))
+    elif platform == "tiktok":
+        for v in d.get("aweme_list", []):
+            out.append((f"https://www.tiktok.com/@{handle}/video/{v.get('aweme_id')}", parse_date(v.get("create_time")),
+                        (v.get("statistics") or {}).get("comment_count") or 0))
+    elif platform == "youtube":
+        for v in d.get("videos", []):
+            out.append((v.get("url"), parse_date(v.get("publishDate") or v.get("publishedTime")), v.get("commentCountInt") or 0))
+    return out
+
+
+def list_feed(c, cfg, party, platform, handle, state):
+    """Telusuri feed sampai melewati period.since. Hasil disimpan di state (bisa dilanjutkan)."""
+    key = f"{party}|{platform}"
+    st = state.setdefault("feeds", {}).setdefault(key, {"cursor": None, "done": False, "items": []})
+    meta = {"party": party, "platform": platform, "seed": handle}
+    max_pages = cfg["sampling"].get("max_feed_pages", 400)
+    pages = 0
+    while not st["done"] and pages < max_pages:
+        if platform == "instagram":
+            p = {"handle": handle, "trim": "true"}
+            if st["cursor"]: p["next_max_id"] = st["cursor"]
+        elif platform == "tiktok":
+            p = {"handle": handle, "sort_by": "latest", "region": "ID", "trim": "true", "include_pinned": "false"}
+            if st["cursor"]: p["max_cursor"] = st["cursor"]
+        else:
+            p = {"handle": handle, "sort": "latest"}
+            if st["cursor"]: p["continuationToken"] = st["cursor"]
+        d = c.get(LIST_EP[platform], p, meta)
+        pages += 1
+        if not d:
+            st["done"] = True; st["stop_reason"] = "gagal/empty"; break
+        items = _list_items(platform, d, handle)
+        st["items"] += [(u, t.isoformat() if t else None, n) for u, t, n in items]
+        nxt = d.get("next_max_id") if platform == "instagram" else (d.get("max_cursor") if platform == "tiktok" else d.get("continuationToken"))
+        more = (d.get("more_available", True) if platform == "instagram" else (d.get("has_more", True) if platform == "tiktok" else True))
+        dated = [t for _, t, _ in items if t]
+        if not nxt or not more or (dated and min(dated) < dt.datetime.fromisoformat(cfg["period"]["since"]).replace(tzinfo=dt.timezone.utc)):
+            st["done"] = True; st["stop_reason"] = "melewati periode" if dated else "akhir feed"
+        st["cursor"] = nxt
+        save_state(state)
+    return st
+
+
+def monthly_sample(items, cfg):
+    """Sampel acak berbenih per bulan kalender, hanya post dengan >=1 komentar (perlu untuk jaringan)."""
+    import random
+    n = cfg["sampling"]["posts_per_month"]
+    seed = cfg["sampling"].get("seed", 2029)
+    by = defaultdict(list)
+    seen = set()
+    for u, t, cc in items:
+        if not u or u in seen or not t: continue
+        seen.add(u)
+        d = parse_date(t)
+        if not in_period(d, cfg) or (cc or 0) < cfg["sampling"].get("min_comments", 1): continue
+        by[d.strftime("%Y-%m")].append(u)
+    out = {}
+    for m, us in sorted(by.items()):
+        rnd = random.Random(f"{seed}-{m}")
+        us = sorted(us)
+        out[m] = us if len(us) <= n else rnd.sample(us, n)
+    return out
+
+
+STATE = ROOT / "data" / "collect_state.json"
+def load_state():
+    return json.loads(STATE.read_text()) if STATE.exists() else {}
+def save_state(state):
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = STATE.with_suffix(".tmp"); tmp.write_text(json.dumps(state)); tmp.replace(STATE)
+
+
+def cmd_collect_monthly(cfg, client=None):
+    """Tahap 1: telusuri feed tiap akun (verified, platform terpilih). Tahap 2: sampel per bulan. Tahap 3: komentar.
+    Bisa dijalankan ulang: feed & komentar yang sudah diambil dilewati."""
+    from concurrent.futures import ThreadPoolExecutor
+    state = load_state()
+    run_id = state.setdefault("run_id", "monthly_" + dt.datetime.now().strftime("%Y%m%d_%H%M%S"))
+    c = client or Client(cfg, run_id)
+    plats = cfg["sampling"]["platforms"]
+    per_acc = cfg["sampling"]["max_credits_per_account"]
+    accounts = [(party, pl, s["handle"]) for party, ps in cfg["seeds"].items() for pl, s in ps.items()
+                if pl in plats and s.get("status") == "verified" and s.get("handle")]
+    spent = state.setdefault("spent", {})
+    try:
+        for party, pl, h in accounts:
+            key = f"{party}|{pl}"
+            before = c.credits
+            st = list_feed(c, cfg, party, pl, h, state)
+            spent[key] = spent.get(key, 0) + (c.credits - before); save_state(state)
+            print(f"[feed] {key} @{h}: {len(st['items'])} post, {st.get('stop_reason')}", flush=True)
+        done = set(state.setdefault("comments_done", []))
+        jobs = []
+        for party, pl, h in accounts:
+            key = f"{party}|{pl}"
+            sample = monthly_sample(state["feeds"][key]["items"], cfg)
+            state.setdefault("sample", {})[key] = sample
+            for m, us in sample.items():
+                for u in us:
+                    if u not in done: jobs.append((party, pl, h, u, m))
+        save_state(state)
+        # urutkan bulan-demi-bulan lintas akun supaya batas kredit memotong secara merata
+        jobs.sort(key=lambda j: (j[4], j[0], j[1]))
+        print(f"[komentar] {len(jobs)} post tersisa", flush=True)
+        ep = {"instagram": "ig_post_comments", "tiktok": "tt_video_comments", "youtube": "yt_video_comments"}
+        def fetch(j):
+            party, pl, h, u, m = j
+            key = f"{party}|{pl}"
+            if spent.get(key, 0) >= per_acc: return j, "skip_budget"
+            p = {"url": u}
+            if pl == "youtube": p["order"] = "top"
+            d = c.get(ep[pl], p, {"party": party, "platform": pl, "seed": h, "content_url": u, "month": m})
+            spent[key] = spent.get(key, 0) + ((d or {}).get("credits_charged", 1) or 0)
+            return j, "ok" if d is not None else "gagal"
+        n = 0
+        with ThreadPoolExecutor(max_workers=cfg["sampling"].get("workers", 6)) as ex:
+            for j, res in ex.map(fetch, jobs):
+                if res != "skip_budget": done.add(j[3])
+                n += 1
+                if n % 25 == 0:
+                    state["comments_done"] = sorted(done); save_state(state)
+                    print(f"[komentar] {n}/{len(jobs)} kredit run={c.credits}", flush=True)
+        state["comments_done"] = sorted(done); save_state(state)
+    except BudgetExceeded as e:
+        save_state(state); print("[collect] DIHENTIKAN:", e)
+    print(f"[collect] selesai. kredit run ini: {c.credits}. per akun: {json.dumps(spent)}", flush=True)
 
 
 def cmd_collect(cfg, client=None):
@@ -463,12 +605,12 @@ def cmd_build(cfg, run_ids=None):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["verify", "collect", "build"])
+    ap.add_argument("command", choices=["verify", "collect", "collect-monthly", "build"])
     ap.add_argument("--config", default=str(ROOT / "config.yaml"))
     ap.add_argument("--runs", nargs="*", help="build: batasi ke run_id tertentu")
     a = ap.parse_args()
     cfg = yaml.safe_load(open(a.config, encoding="utf-8"))
-    {"verify": cmd_verify, "collect": cmd_collect}.get(a.command, lambda c: cmd_build(c, a.runs))(cfg)
+    {"verify": cmd_verify, "collect": cmd_collect, "collect-monthly": cmd_collect_monthly}.get(a.command, lambda c: cmd_build(c, a.runs))(cfg)
 
 
 if __name__ == "__main__":

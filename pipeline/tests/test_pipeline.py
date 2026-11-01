@@ -18,6 +18,7 @@ class FakeClient(sp.Client):
     def __init__(self, cfg, run_id):
         self.cfg, self.run_id, self.credits, self.max, self.n = cfg, run_id, 0, cfg["budget"]["max_credits_per_run"], 0
         self.calls = []
+        import threading; self.lock = threading.Lock()
 
     def get(self, key, params, meta):
         if self.credits >= self.max:
@@ -102,3 +103,20 @@ def test_no_double_count_across_runs(tmp_path, monkeypatch):
     sp.cmd_collect(cfg, client=FakeClient(cfg, "r2")); sp.cmd_build(cfg)   # komentar yang sama terambil lagi
     assert len(read(tmp_path / "out" / "comment_dataset.csv")) == n1
     assert len(read(tmp_path / "out" / "sna_explorer.csv")) == e1
+
+
+def test_monthly_sampling(tmp_path, monkeypatch):
+    cfg = setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(sp, "STATE", tmp_path / "state.json")
+    cfg["period"] = {"since": "2026-10-01", "until": "2026-11-30"}
+    cfg["sampling"] = {"platforms": ["instagram", "tiktok", "youtube"], "posts_per_month": 2, "min_comments": 1,
+                       "seed": 2029, "max_credits_per_account": 50, "max_feed_pages": 3, "workers": 2}
+    fc = FakeClient(cfg, "m"); sp.cmd_collect_monthly(cfg, client=fc)
+    st = json.loads((tmp_path / "state.json").read_text())
+    ig = st["sample"]["PKS|instagram"]
+    assert set(ig) <= {"2026-10", "2026-11"} and all(len(v) <= 2 for v in ig.values())
+    # deterministik: run ulang memberi sampel sama dan tidak mengambil ulang komentar
+    n_calls = len(fc.calls); fc2 = FakeClient(cfg, "m"); sp.cmd_collect_monthly(cfg, client=fc2)
+    assert json.loads((tmp_path / "state.json").read_text())["sample"]["PKS|instagram"] == ig
+    assert "ig_post_comments" not in fc2.calls
+    assert "x_user_tweets" not in fc.calls
