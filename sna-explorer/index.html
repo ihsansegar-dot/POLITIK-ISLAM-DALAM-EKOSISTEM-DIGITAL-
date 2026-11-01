@@ -539,7 +539,7 @@ function rebuild(){
       (S.nets.retweet.betwSkipped||S.nets.reply.betwSkipped?' Betweenness dilewati karena graf terlalu besar; <button class="btn" id="forceB" type="button">hitung tetap</button>':'');
     status(msg, (sk||S.parseNote||dateNote)?'warn':'');
     const fb=$('forceB'); if(fb) fb.onclick=()=>{ for(const t of NETS){ const n=S.nets[t]; n.forceBetw=true; status('Menghitung betweenness…'); } setTimeout(()=>{ for(const t of NETS){ const n=S.nets[t]; const b=L.metrics.centrality.betweenness(n.g,{getEdgeWeight:null,normalized:true}); for(const k in b) n.M[k].betw=b[k]||0; n.betwSkipped=false; } status('Betweenness selesai dihitung.'); renderAll(false); },30); };
-    $('dataPill').textContent = S.source.startsWith('Contoh') ? 'contoh sintetis' : (S.source.startsWith('Data penelitian') ? 'data nyata · sampel TikTok 1 Nov 2026' : 'data unggahan');
+    $('dataPill').textContent = S.source.startsWith('Contoh') ? 'contoh sintetis' : (S.source.startsWith('Data penelitian') ? 'data nyata · TikTok (sampel 1 Nov 2026) + media online (arsip Jan 2024–Nov 2026)' : 'data unggahan');
     $('dataPill').className = 'pill' + (S.source.startsWith('Contoh') ? '' : ' live');
     const maxN=Math.max(S.nets.retweet.g.order,S.nets.reply.g.order,20);
     const mx=$('maxNodes'); mx.max=Math.max(20,Math.ceil(maxN/10)*10);
@@ -1093,15 +1093,23 @@ function findProv(t){
 }
 const TAG=/#([\p{L}\p{N}_]{2,40})/gu;
 let CONTENT=[]; const GEO={tab:'lok', sel:null, selKind:null, recs:[], focus:null};
+// Media online: buang dateline ("JAKARTA, KOMPAS.com -", "Liputan6.com, Jakarta -", "Jakarta -") agar lokasi
+// redaksi tidak terhitung sebagai lokasi yang diberitakan.
+function stripDL(t){ const i=(t||'').indexOf(' — '); if(i<0) return t||''; let e=t.slice(i+3);
+  e=e.replace(/^[^—\-–]{0,50}?(kompas|kompaa|liputan6|bisnis|viva|detik|cnn|antara|tribun|jpnn|okezone|sindo)[^\-–]{0,25}\s[-–]{1,2}\s/i,'')
+     .replace(/^[A-Z][A-Za-z]{2,20}\s[-–]{1,2}\s/,'');
+  return t.slice(0,i)+' — '+e; }
+function rtext(r){ return r.plat==='media' ? stripDL(r.text) : (r.text||''); }
 function buildGeo(){
   const rows=filteredRows(); const recs=[];
   for(const r of rows){
-    if(r.t==='mention') continue; // teks baris mention = caption; caption dihitung sekali dari content.csv
+    if(r.t==='mention' && r.plat!=='media') continue; // teks baris mention = caption; caption dihitung sekali dari content.csv
     const info=REAL.get(r.a)||{};
     const tags=[...(r.text||'').matchAll(TAG)].map(m=>m[1].toLowerCase());
-    findProv(r.text).forEach(p=>recs.push({p,src:'teks',a:r.a,party:r.party,tags}));
+    const tx=rtext(r);
+    findProv(tx).forEach(p=>recs.push({p,src:'teks',a:r.a,party:r.party,tags}));
     findProv((info.handle||'')+' '+(info.nickname||'')).forEach(p=>recs.push({p,src:'akun',a:r.a,party:r.party,tags}));
-    if(tags.length && !findProv(r.text).length) recs.push({p:null,src:'teks',a:r.a,party:r.party,tags});
+    if(tags.length && !findProv(tx).length) recs.push({p:null,src:'teks',a:r.a,party:r.party,tags});
   }
   for(const c of CONTENT){
     if(S.fPlat && c.platform!==S.fPlat) continue; if(S.fParty && c.party!==S.fParty) continue;
@@ -1193,7 +1201,7 @@ let CMAP=new Map(); const ECACHE=new Map();
 function entsOf(r){
   let e=ECACHE.get(r); if(e) return e;
   const info=REAL.get(r.a)||{};
-  e={kom: r.t==='mention'? extract('',true) : extract(r.text,true), cap: extract(CMAP.get(r.url)||'',true), akun: extract((info.handle||'').replace(/[_.]/g,' ')+' '+(info.nickname||''),false)};
+  e={kom: (r.t==='mention' && r.plat!=='media')? extract('',true) : extract(rtext(r),true), cap: extract(CMAP.get(r.url)||'',true), akun: extract((info.handle||'').replace(/[_.]/g,' ')+' '+(info.nickname||''),false)};
   ECACHE.set(r,e); return e;
 }
 function entSets(r,kind,src){ const e=entsOf(r); const out=new Set();
