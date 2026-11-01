@@ -59,6 +59,14 @@ h1{font:700 24px/1.1 var(--f-display);margin:0;letter-spacing:.2px;text-wrap:bal
 .status.warn{background:var(--warn-soft);color:var(--warn)}
 .status.err{background:var(--warn-soft);color:var(--bad)}
 .kpis{display:flex;flex-wrap:wrap;gap:8px}
+.plats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+.plat{border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:var(--panel);text-align:left;cursor:pointer;display:grid;gap:3px;border-left:4px solid var(--pc)}
+.plat:hover{border-color:var(--pc)}
+.plat[aria-pressed="true"]{box-shadow:inset 0 0 0 1.5px var(--pc);background:var(--bg)}
+.plat.empty{opacity:.55;cursor:default;border-left-color:var(--line)}
+.plat .pn{font:600 14px var(--f-display);display:flex;justify-content:space-between;gap:6px}
+.plat .pn span{font:500 12px var(--f-mono);color:var(--muted)}
+.plat .pp{font-size:11.5px;color:var(--muted);font-family:var(--f-mono)}
 .kpi{border:1px solid var(--line);border-radius:8px;padding:6px 10px;min-width:96px;background:var(--bg)}
 .kpi b{display:block;font:600 18px/1.2 var(--f-display);font-variant-numeric:tabular-nums}
 .kpi span{font-size:11.5px;color:var(--muted)}
@@ -170,6 +178,7 @@ tr.sel td{background:var(--accent-soft)}
     </div>
     <div class="status" id="status" role="status">Memuat pustaka…</div>
     <div class="kpis" id="kpis"></div>
+    <div class="plats" id="plats" aria-label="Cakupan data per platform"></div>
   </section>
 
   <section class="explorer">
@@ -507,7 +516,23 @@ function renderAll(relayout){
 }
 
 /* ---------- KPIs ---------- */
+const PLATS=[['tiktok','TikTok','#e2336b'],['instagram','Instagram','#b44fd1'],['youtube','YouTube','#d93025'],['x','X (Twitter)','#4b5563']];
+function renderPlats(){
+  const el=$('plats'); const rows=S.rows; const known=new Set(PLATS.map(p=>p[0]));
+  const extra=[...new Set(rows.map(r=>r.plat).filter(p=>p&&!known.has(p)))].map(p=>[p,p,'#6b7280']);
+  if(!rows.some(r=>r.plat)){ el.innerHTML=''; return; }
+  el.innerHTML=[...PLATS,...extra].map(([k,name,c])=>{
+    const rs=rows.filter(r=>r.plat===k); const n=rs.length;
+    const by={}; rs.forEach(r=>{ if(r.party) by[r.party]=(by[r.party]||0)+1; });
+    const parts=['PKS','PKB','PPP','PAN'].map(p=>`${p} ${fmtInt(by[p]||0)}`).join(' · ');
+    return `<button type="button" class="plat${n?'':' empty'}" style="--pc:${c}" data-p="${k}" aria-pressed="${S.fPlat===k}" ${n?'':'disabled'}>
+      <span class="pn">${esc(name)}<span>${n?fmtInt(n)+' interaksi':'belum ada data'}</span></span>
+      <span class="pp">${n?parts:'–'}</span></button>`;
+  }).join('');
+  el.querySelectorAll('.plat:not(.empty)').forEach(b=>b.onclick=()=>{ S.fPlat = S.fPlat===b.dataset.p ? '' : b.dataset.p; $('fPlat').value=S.fPlat; rebuild(); });
+}
 function renderKpis(){
+  renderPlats();
   const s=S.summary, net=S.nets[S.net], g=net.g;
   const dens = g.order>1 ? g.size/(g.order*(g.order-1)) : 0;
   const items=[
