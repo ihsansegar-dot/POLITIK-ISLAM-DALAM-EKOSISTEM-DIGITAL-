@@ -3,10 +3,11 @@
 Media online tentang PKS, PKB, PPP, PAN (Jan 2024 – sekarang).
 
 Tahap:
-  python news_scrapling.py discover   -> cari artikel via GDELT DOC 2.0 (per partai per bulan, media Indonesia)
+  python news_scrapling.py discover   -> cari artikel via GDELT DOC 2.0 (hanya ~3 bulan terakhir; indeks lama GDELT tidak andal)
+  python news_scrapling.py sitemaps   -> cari artikel 2024–kini dari sitemap resmi tiap media (robots.txt -> sitemap)
   python news_scrapling.py fetch      -> ambil teks artikel dengan Scrapling (HTTP biasa, patuh robots.txt, berjeda)
   python news_scrapling.py export     -> data/processed/media_articles.csv + sna_media.csv (+ gabung ke sna_explorer.csv)
-  python news_scrapling.py all        -> ketiganya berurutan
+  python news_scrapling.py all        -> semuanya berurutan
 
 Etika (protokol V.F): tidak memakai StealthyFetcher/DynamicFetcher, tidak melewati paywall/CAPTCHA,
 User-Agent jujur, jeda per domain, robots.txt dihormati. Teks penuh hanya disimpan lokal untuk analisis;
@@ -46,6 +47,11 @@ DEFAULT = {
     "domain_delay_s": 3,
     "user_agent": "PolitikIslamDigital-research/0.1 (riset akademik; kontak: ihsansegar@gmail.com)",
     "deny_domains": [],
+    "gdelt_recent_months": 3,         # GDELT ArtList hanya andal ~3 bulan terakhir
+    # media yang ditelusuri lewat sitemap resminya (bisa diubah di config.yaml)
+    "sitemap_domains": ["antaranews.com", "kompas.com", "detik.com", "tempo.co", "cnnindonesia.com",
+                        "republika.co.id", "liputan6.com", "kumparan.com"],
+    "max_sitemaps_per_domain": 1100,  # batas jumlah file sitemap yang dibaca per media
 }
 
 
@@ -97,8 +103,11 @@ def cmd_discover(c, http_get=None):
     sess = requests.Session(); sess.headers["User-Agent"] = c["user_agent"]
     http_get = http_get or (lambda u: sess.get(u, timeout=60).text)
     RAW.mkdir(parents=True, exist_ok=True)
+    until = dt.date.fromisoformat(c["until"])
+    start = (until.replace(day=1) - dt.timedelta(days=31 * (c["gdelt_recent_months"] - 1))).replace(day=1)
+    start = max(start, dt.date.fromisoformat(c["since"]))
     for party, q in c["queries"].items():
-        for a, b in months(c["since"], c["until"]):
+        for a, b in months(start.isoformat(), c["until"]):
             key = f"{party}|{a:%Y-%m}"
             if key in s["windows_done"]: continue
             arts = gdelt_window(q, a, b, c, http_get)
@@ -117,6 +126,139 @@ def cmd_discover(c, http_get=None):
             if len(arts) >= c["max_records_per_query"]:
                 print(f"  ! {key} menyentuh batas {c['max_records_per_query']}: liputan bulan ini terpotong", flush=True)
             time.sleep(c["gdelt_delay_s"])
+
+
+# ----------------------------------------------------------------------------- discover (sitemap resmi media)
+SLUG_PATS = {
+    "PKS": r"(?:^|[-_/ ])pks(?:[-_/. ]|$)|partai[-_ ]keadilan[-_ ]sejahtera",
+    "PKB": r"(?:^|[-_/ ])pkb(?:[-_/. ]|$)|partai[-_ ]kebangkitan[-_ ]bangsa",
+    "PPP": r"(?:^|[-_/ ])ppp(?:[-_/. ]|$)|partai[-_ ]persatuan[-_ ]pembangunan",
+    "PAN": r"(?:^|[-_/ ])pan(?:[-_/. ]|$)|partai[-_ ]amanat[-_ ]nasional",
+}
+_TAG = lambda t: re.compile(rf"<(?:\w+:)?{t}>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</(?:\w+:)?{t}>", re.S | re.I)
+_LOC, _LASTMOD, _PUB, _TITLE = _TAG("loc"), _TAG("lastmod"), _TAG("publication_date"), _TAG("title")
+_DATE_RX = [re.compile(r"(?<!\d)(20[12]\d)[-/_]?(0[1-9]|1[0-2])[-/_]?(0[1-9]|[12]\d|3[01])(?!\d)"),
+            re.compile(r"yyyy=(20[12]\d)&(?:amp;)?mm=(\d{1,2})(?:&(?:amp;)?dd=(\d{1,2}))?"),
+            re.compile(r"(?<!\d)(20[12]\d)[-/_](0[1-9]|1[0-2])(?![\d])()")]
+
+
+def parse_sitemap(xml):
+    """-> (anak_sitemap[(loc, lastmod)], url[(loc, tanggal_str, judul)])"""
+    unesc = lambda x: (x or "").replace("&amp;", "&").strip()
+    kids = [(unesc(_LOC.search(b).group(1)), unesc((_LASTMOD.search(b) or [None, ""])[1]))
+            for b in re.findall(r"<sitemap\b.*?</sitemap>", xml, re.S | re.I) if _LOC.search(b)]
+    urls = []
+    for b in re.findall(r"<url\b.*?</url>", xml, re.S | re.I):
+        m = _LOC.search(b)
+        if not m: continue
+        pub = _PUB.search(b) or _LASTMOD.search(b)
+        t = _TITLE.search(b)
+        urls.append((unesc(m.group(1)), unesc(pub.group(1)) if pub else "", unesc(t.group(1)) if t else ""))
+    return kids, urls
+
+
+def date_of(*cands):
+    """tanggal (date) pertama yang bisa dibaca dari string ISO atau pola tanggal di URL."""
+    for x in cands:
+        if not x: continue
+        m = re.match(r"(20\d\d)-(\d\d)-(\d\d)", x)
+        if m:
+            try: return dt.date(*map(int, m.groups()))
+            except ValueError: pass
+        for rx in _DATE_RX:
+            m = rx.search(x)
+            if m:
+                y, mo, d = m.group(1), m.group(2), m.group(3) or "1"
+                try: return dt.date(int(y), int(mo), int(d))
+                except ValueError: pass
+    return None
+
+
+def parties_in(title, url):
+    pats = {p: re.compile(rx) for p, rx in DEFAULT["party_patterns"].items()}
+    found = {p for p, rx in pats.items() if title and rx.search(title)}
+    slug = urllib.parse.urlsplit(url).path.lower()
+    found |= {p for p, rx in SLUG_PATS.items() if re.search(rx, slug)}
+    return sorted(found)
+
+
+def _decode(raw):
+    import gzip
+    if isinstance(raw, str): return raw
+    if raw[:2] == b"\x1f\x8b":
+        try: raw = gzip.decompress(raw)
+        except OSError: pass
+    return raw.decode("utf-8", "replace")
+
+
+def crawl_domain(domain, c, pol, http_get, seen):
+    """Telusuri sitemap satu media. seen = set URL sitemap yang sudah dibaca (untuk melanjutkan)."""
+    since, until = dt.date.fromisoformat(c["since"]), dt.date.fromisoformat(c["until"])
+    floor = since.replace(day=1)
+    base = f"https://www.{domain}"
+    pol.allowed(base + "/")  # muat robots.txt
+    rp = pol.robots.get(base)
+    queue = list((rp.site_maps() if rp and rp.site_maps() else None) or [base + "/sitemap.xml", base + "/sitemap_index.xml"])
+    found, n_read, errors = [], 0, 0
+    while queue and n_read < c["max_sitemaps_per_domain"]:
+        sm = queue.pop(0)
+        if sm in seen: continue
+        seen.add(sm)
+        if not pol.allowed(sm): continue
+        try:
+            xml = _decode(http_get(sm)); n_read += 1
+        except Exception:
+            errors += 1; continue
+        kids, urls = parse_sitemap(xml)
+        for loc, lastmod in kids:
+            d = date_of(loc) or date_of(lastmod)
+            if d and (d < floor or d > until): continue  # di luar periode
+            queue.append(loc)
+        for loc, pub, title in urls:
+            d = date_of(pub, loc)
+            if not d or d < since or d > until: continue
+            ps = parties_in(title, loc)
+            if ps: found.append({"url": loc, "domain": urllib.parse.urlsplit(loc).netloc, "title": title,
+                                 "pub_hint": d.isoformat(), "parties_query": ps, "month": f"{d:%Y-%m}", "source": "sitemap"})
+    return found, n_read, errors
+
+
+def cmd_sitemaps(c, http_get=None):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    s = load_state(); s.setdefault("sitemap_seen", {}); lock = threading.Lock()
+    pol = Polite(c)
+    if http_get is None:
+        import requests
+        sess = requests.Session(); sess.headers["User-Agent"] = c["user_agent"]
+        def http_get(u):
+            r = sess.get(u, timeout=40); r.raise_for_status(); return r.content
+    def polite_get(u):
+        dom = urllib.parse.urlsplit(u).netloc
+        with lock:
+            wait = c["domain_delay_s"] - (time.time() - pol.last.get(dom, 0)); pol.last[dom] = time.time() + max(wait, 0)
+        if wait > 0: time.sleep(wait)
+        return http_get(u)
+    def job(domain):
+        seen = set(s["sitemap_seen"].get(domain, []))
+        found, n, err = crawl_domain(domain, c, pol, polite_get, seen)
+        with lock:
+            new = 0
+            for x in found:
+                k = aid(x["url"])
+                if k not in s["articles"]: s["articles"][k] = dict(x, parties_query=[]); new += 1
+                r = s["articles"][k]
+                r["parties_query"] = sorted(set(r["parties_query"]) | set(x["parties_query"]))
+            s["sitemap_seen"][domain] = sorted(seen); save_state(s)
+        print(f"[sitemaps] {domain}: {n} sitemap dibaca, {err} gagal, {len(found)} artikel cocok ({new} baru)", flush=True)
+        if n >= c["max_sitemaps_per_domain"]:
+            print(f"  ! {domain} menyentuh batas {c['max_sitemaps_per_domain']} sitemap; jalankan ulang untuk melanjutkan", flush=True)
+    with ThreadPoolExecutor(max_workers=len(c["sitemap_domains"]) or 1) as ex:
+        list(ex.map(job, c["sitemap_domains"]))
+    by = defaultdict(int)
+    for r in s["articles"].values():
+        for p in r["parties_query"]: by[p] += 1
+    print(f"[sitemaps] total artikel unik {len(s['articles'])}; per partai: {dict(sorted(by.items()))}", flush=True)
 
 
 # ----------------------------------------------------------------------------- fetch (Scrapling)
@@ -219,11 +361,12 @@ def cmd_export(c):
         title = f.get("title") or r.get("title") or ""
         hay = title + "\n" + text
         parties = sorted({p for p, rx in pats.items() if rx.search(hay)} | (set() if text else set(r["parties_query"])))
-        pub = f.get("published") or (r.get("seendate") and dt.datetime.strptime(r["seendate"], "%Y%m%dT%H%M%SZ").replace(tzinfo=dt.timezone.utc).isoformat()) or ""
+        pub = f.get("published") or r.get("pub_hint") or (r.get("seendate") and dt.datetime.strptime(r["seendate"], "%Y%m%dT%H%M%SZ").replace(tzinfo=dt.timezone.utc).isoformat()) or ""
         excerpt = (text[:300] + "…") if len(text) > 300 else text
         rows.append({"article_id": k, "url": r["url"], "domain": r["domain"], "title": title, "published": pub,
                      "parties": ";".join(parties), "parties_query": ";".join(r["parties_query"]),
-                     "text_fetched": bool(text), "text_chars": len(text), "fetch_error": f.get("error", ""), "month": r["month"]})
+                     "text_fetched": bool(text), "text_chars": len(text), "fetch_error": f.get("error", ""), "month": r["month"],
+                     "source": r.get("source", "gdelt")})
         for p in parties:  # edge media -> partai (mention); ko-penyebutan membentuk jembatan antarpartai
             sna.append({"author": r["domain"], "text": title + (" — " + excerpt if excerpt else ""), "type": "mention",
                         "target_user": f"{p}_partai", "created_at": pub, "platform": "media", "party": p,
@@ -246,9 +389,10 @@ def cmd_export(c):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["discover", "fetch", "export", "all"])
+    ap.add_argument("command", choices=["discover", "sitemaps", "fetch", "export", "all"])
     a = ap.parse_args(); c = cfg_media()
     if a.command in ("discover", "all"): cmd_discover(c)
+    if a.command in ("sitemaps", "all"): cmd_sitemaps(c)
     if a.command in ("fetch", "all"): cmd_fetch(c)
     if a.command in ("export", "all"): cmd_export(c)
 
