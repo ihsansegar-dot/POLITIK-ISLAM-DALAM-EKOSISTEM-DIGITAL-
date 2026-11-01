@@ -42,7 +42,8 @@ def test_parse_and_crawl(tmp_path, monkeypatch):
     assert arts["zulhas"]["parties_query"] == ["PAN"] and arts["zulhas"]["month"] == "2024-08"
     assert arts["ppp-gelar-muktamar"]["month"] == "2025-03"
     # dijalankan ulang: tidak membaca sitemap yang sama lagi
-    got.clear(); ns.cmd_sitemaps(c, http_get=http_get); assert got == []
+    got.clear(); ns.cmd_sitemaps(c, http_get=http_get)
+    assert not (set(got) & set(pages))   # yang sudah terbaca tidak diminta lagi; yang gagal (404) dicoba ulang
 
 
 def test_date_of():
