@@ -149,6 +149,14 @@ canvas#g.hovering{cursor:pointer}
 .muted{color:var(--muted)}
 .tables{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .senti{margin-top:14px;display:grid;gap:10px}
+.ai{margin:14px 0 0;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:grid;gap:10px}
+.ai-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.ai-head h2{font:600 12px/1 var(--f-display);text-transform:uppercase;letter-spacing:.9px;color:var(--muted);margin:0 0 6px}
+.ai-btns{display:flex;gap:6px}
+.ai-out{font-size:14px;line-height:1.55;max-width:110ch}
+.ai-out ol{margin:0;padding-left:22px;display:grid;gap:8px}
+.ai-out .conf{font-size:12px;color:var(--muted)}
+.ai-out .err{color:#b42318}
 .sentbox .seg button{font-size:12px;padding-left:2px;padding-right:2px}
 #segFSent button[data-k=positif][aria-pressed=true]{background:#0f8b8d;border-color:#0f8b8d;color:#fff}
 #segFSent button[data-k=netral][aria-pressed=true]{background:#9aa1ab;border-color:#9aa1ab;color:#fff}
@@ -219,6 +227,19 @@ tr.sel td{background:var(--accent-soft)}
     <div class="status" id="status" role="status">Memuat pustaka…</div>
     <div class="kpis" id="kpis"></div>
     <div class="plats" id="plats" aria-label="Cakupan data per platform"></div>
+  </section>
+
+  <section class="ai" id="aiBox" hidden aria-label="Ringkasan AI">
+    <div class="ai-head">
+      <div><h2>Ringkasan AI</h2>
+        <p class="small" id="aiMeta">5 poin utama dari data pada filter yang sedang aktif. Yang dikirim ke Claude hanya ringkasan angka dan beberapa contoh teks, bukan seluruh data mentah.</p></div>
+      <div class="ai-btns">
+        <button type="button" class="btn primary" id="aiGo">Generate AI Summary</button>
+        <button type="button" class="btn" id="aiStop" hidden>Batalkan</button>
+        <button type="button" class="btn" id="aiCopy" hidden>Salin</button>
+      </div>
+    </div>
+    <div class="ai-out" id="aiOut" hidden></div>
   </section>
 
   <section class="explorer">
@@ -1088,9 +1109,90 @@ $('btnCopy').onclick=async()=>{
   catch(e){ status('Clipboard ditolak oleh browser. Gunakan tombol Ekspor GEXF.','err'); }
 };
 
+/* ---------- Ringkasan AI (capability `sample`: tanpa API key di halaman) ---------- */
+const AI={sample:null, ctl:null, text:''};
+function isPublicId(id){ const r=REAL.get(id)||{}; return /_official$|_partai$/.test(id) || /\.[a-z]{2,}$/.test(id) || /institution|media|party/.test(r.verified_reason||''); }
+function aiName(id){ return isPublicId(id) ? lab(id) : id; }   // warganet: pakai ID pseudonim, bukan nama asli
+function aiPayload(){
+  const rows=filteredRows(), net=S.nets[S.net], ym=ts=>new Date(ts).toISOString().slice(0,7);
+  const cnt=(arr,f)=>arr.reduce((m,x)=>{const k=f(x); if(k) m[k]=(m[k]||0)+1; return m;},{});
+  const plat={}; rows.forEach(r=>{ const p=plat[r.plat]=plat[r.plat]||{}; p[r.party||'-']=(p[r.party||'-']||0)+1; });
+  const nets={}; for(const t of NETS){ const n=S.nets[t]; if(!n) continue; const g=n.g; nets[t]={node:g.order, edge:g.size, interaksi:n.totalW||undefined, densitas:+(g.order>1?g.size/(g.order*(g.order-1)):0).toFixed(4), komunitas:n.commCount, modularitas:isNaN(n.Q)?null:+n.Q.toFixed(3)}; }
+  const top=(key)=>Object.keys(net.M).sort((a,b)=>net.M[b][key]-net.M[a][key]).slice(0,8).map(id=>({akun:aiName(id), nilai:+(+net.M[id][key]).toFixed(4)}));
+  const comms=(net.comms||[]).slice(0,6).map(c=>({ukuran:c.size, anggota_teratas:c.top.map(aiName)}));
+  const sentRows=rows.filter(r=>sentOf(r));
+  const sent={model:({main:'IndoBERT (mdhugol)',alt:'RoBERTa (w11wo)',agree:'hanya label yang disepakati kedua model'})[SST.m], ambang_keyakinan:S.sMin,
+    per_platform:Object.fromEntries([...new Set(sentRows.map(r=>r.plat))].map(pl=>[pl,cnt(sentRows.filter(r=>r.plat===pl),sentOf)])),
+    per_partai:Object.fromEntries(['PKS','PKB','PPP','PAN'].map(p=>[p,cnt(sentRows.filter(r=>r.party===p),sentOf)])),
+    catatan:$('sentiDesc')?$('sentiDesc').textContent.replace(/\s+/g,' ').slice(0,400):''};
+  const geo=Object.entries(cnt(GEO.recs||[],r=>r.p)).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const ent=new Map(); rows.forEach(r=>entSets(r,S.ent.kind,S.ent.src).forEach(x=>ent.set(x,(ent.get(x)||0)+1)));
+  const tren={}; rows.forEach(r=>{ if(r.ts==null) return; const k=ym(r.ts); (tren[k]=tren[k]||{})[r.party||'-']=(tren[k][r.party||'-']||0)+1; });
+  const pick=k=>sentRows.filter(r=>sentOf(r)===k).sort((a,b)=>sentScore(b)-sentScore(a)).slice(0,4).map(r=>({platform:r.plat, partai:r.party, teks:(r.sText||r.text).slice(0,160)}));
+  return {
+    filter:{platform:S.fPlat||'semua', partai:S.fParty||'semua', jaringan_aktif:S.net,
+      tanggal:[$('dFrom').value||null,$('dTo').value||null], entitas:S.ent.val?{jenis:S.ent.kind,nilai:S.ent.val}:null, sentimen:S.fSent||'semua'},
+    ringkasan:{baris_dipakai:rows.length, baris_total:S.rows.length, akun_unik:S.summary?S.summary.authors:null, tipe:S.summary?S.summary.cnt:null},
+    platform_x_partai:plat, jaringan:nets,
+    metrik_teratas:{jaringan:S.net, pagerank:top('pr'), in_degree:top('indeg'), betweenness:net.betwSkipped?'dilewati':top('betw')},
+    komunitas_louvain:comms, sentimen:sent,
+    lokasi_disebut_teratas:geo, entitas_teratas:{jenis:S.ent.kind, daftar:[...ent].sort((a,b)=>b[1]-a[1]).slice(0,12)},
+    tren_bulanan_per_partai:tren,
+    contoh_teks:{positif:pick('positif'), negatif:pick('negatif')},
+    konteks:'Data penelitian: sampel komentar TikTok akun resmi PKS, PKB, PPP, PAN (diambil 1 Nov 2026) dan judul berita online (liputan6, detik, cnnindonesia, kompas; sampel 4 hari per bulan Jan 2024–Nov 2026). Media diwakili sebagai edge mention media→partai berdasarkan nama partai di judul. Instagram, YouTube, X belum ada data.'
+  };
+}
+function aiPrompt(d){
+  return `Anda analis komunikasi politik dan analisis jaringan sosial. Berdasarkan HANYA data JSON di bawah (hasil dashboard "Politik Islam Digital"), tulis ringkasan analitik dalam Bahasa Indonesia baku.
+
+Format wajib:
+- Tepat 5 poin bernomor (1. sampai 5.), tanpa kalimat pembuka atau penutup.
+- Setiap poin: judul singkat dalam **tebal**, lalu 1–3 kalimat yang memuat angka dari data.
+- Akhiri setiap poin dengan "[Keyakinan: tinggi/sedang/rendah – alasan singkat]".
+- Poin 5 wajib membahas batasan data atau metode yang paling memengaruhi tafsir (mis. ukuran sampel, cakupan platform, keandalan label sentimen/kappa).
+
+Aturan:
+- Jangan mengarang angka, tren, atau sebab yang tidak didukung data. Bila data tidak cukup, katakan demikian.
+- Bedakan korelasi/deskripsi dari klaim sebab-akibat.
+- Jangan menyebut nama akun individu warganet; rujuk akun resmi partai dan media saja (ID berawalan u_ adalah pseudonim warganet).
+- Sentimen = nada teks menurut model, bukan sikap terhadap partai.
+
+DATA:
+${JSON.stringify(d)}`;
+}
+function mdLite(t){
+  const lines=esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/\[Keyakinan:([^\]]+)\]/g,'<span class="conf">[Keyakinan:$1]</span>').split(/\n+/);
+  const items=[]; let pre=[];
+  for(const l of lines){ const m=l.match(/^\s*(\d+)[.)]\s+(.*)$/); if(m) items.push(m[2]); else if(items.length) items[items.length-1]+=' '+l.trim(); else if(l.trim()) pre.push(l); }
+  return (pre.length?`<p>${pre.join('<br>')}</p>`:'')+(items.length?`<ol>${items.map(x=>`<li>${x}</li>`).join('')}</ol>`:'');
+}
+async function aiRun(){
+  if(!AI.sample||!S.summary) return;
+  const out=$('aiOut'); out.hidden=false; out.innerHTML='<span class="small">Menyiapkan ringkasan data…</span>';
+  $('aiGo').disabled=true; $('aiStop').hidden=false; $('aiCopy').hidden=true;
+  const d=aiPayload(); AI.ctl=new AbortController(); AI.text='';
+  const fl=d.filter; const flt=[fl.platform!=='semua'&&'platform '+fl.platform, fl.partai!=='semua'&&'partai '+fl.partai, fl.entitas&&'entitas '+fl.entitas.nilai, fl.sentimen!=='semua'&&'sentimen '+fl.sentimen, (fl.tanggal[0]||fl.tanggal[1])&&'tanggal '+(fl.tanggal[0]||'…')+'–'+(fl.tanggal[1]||'…')].filter(Boolean).join(', ')||'tanpa filter';
+  try{
+    const res=await AI.sample(aiPrompt(d),{modelTier:'default', signal:AI.ctl.signal,
+      onText:({text})=>{ AI.text=text; out.innerHTML=mdLite(text)||'<span class="small">Claude sedang menulis…</span>'; }});
+    AI.text=res.text||AI.text; out.innerHTML=mdLite(AI.text)+(res.truncated?'<p class="small">Jawaban terpotong.</p>':'');
+    $('aiMeta').textContent=`Dibuat ${new Date().toLocaleString('id-ID')} dari ${fmtInt(d.ringkasan.baris_dipakai)} baris (${flt}; jaringan ${d.filter.jaringan_aktif}; sentimen ${d.sentimen.model}). Ringkasan AI bisa keliru: cocokkan angkanya dengan panel di bawah sebelum dikutip.`;
+    $('aiCopy').hidden=false;
+  }catch(e){
+    if(e&&e.name==='AbortError'){ out.innerHTML+=(AI.text?'':'')+'<p class="small">Dibatalkan.</p>'; }
+    else if(e&&e.code==='not_granted'){ out.innerHTML='<p class="err">Izin memakai Claude tidak diberikan, jadi ringkasan tidak dibuat.</p>'; }
+    else if(e&&e.code==='rate_limited'){ out.innerHTML='<p class="err">Batas pemakaian tercapai. Coba lagi beberapa saat lagi.</p>'; }
+    else { out.innerHTML=(AI.text?mdLite(AI.text):'')+`<p class="err">Gagal membuat ringkasan: ${esc((e&&e.message)||String(e))}</p>`; }
+  }finally{ $('aiGo').disabled=false; $('aiGo').textContent='Generate ulang'; $('aiStop').hidden=true; AI.ctl=null; }
+}
+$('aiGo').onclick=aiRun;
+$('aiStop').onclick=()=>{ if(AI.ctl) AI.ctl.abort(); };
+$('aiCopy').onclick=async()=>{ try{ await navigator.clipboard.writeText(AI.text); $('aiCopy').textContent='Tersalin'; setTimeout(()=>$('aiCopy').textContent='Salin',1500); }catch(e){ status('Clipboard ditolak oleh browser.','err'); } };
+
 /* ---------- capability ---------- */
 if(window.claude && typeof window.claude.use==='function'){
   window.claude.use('downloads').then(d=>{ S.dl=d; }).catch(()=>{});
+  window.claude.use('sample').then(f=>{ AI.sample=f; $('aiBox').hidden=!f; }).catch(()=>{});
 }
 
 /* ---------- start ---------- */
