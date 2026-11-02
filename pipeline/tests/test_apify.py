@@ -74,3 +74,27 @@ def test_full_budget_comments(tmp_path, monkeypatch):
     assert {("instagram", "comment"), ("instagram", "reply"), ("youtube", "comment")} <= kinds
     ig = [r for r in rows if r["platform"] == "instagram" and r["interaction"] == "comment"]
     assert {r["target_user"] for r in ig} <= {"PKS_instagram_official", "PKB_instagram_official", "PPP_instagram_official", "PAN_instagram_official"}
+
+def test_v3_client_style():
+    """apify-client v3: call(run_timeout=timedelta) mengembalikan model (snake_case), bukan dict."""
+    from types import SimpleNamespace as NS
+    from enum import Enum
+    class St(Enum): OK = "SUCCEEDED"
+    seen = {}
+    class A3:
+        def call(self, *, run_input=None, max_items=None, run_timeout=None, timeout="no_timeout"):
+            seen["rt"] = run_timeout
+            return NS(id="r1", status=St.OK, default_dataset_id="d1", usage_total_usd=0.01)
+    run = ac._call(A3(), {"x": 1}, 5)
+    assert seen["rt"] == dt.timedelta(seconds=3600)
+    assert ac._rget(run, "defaultDatasetId", "default_dataset_id") == "d1"
+    assert ac._rget(run, "usageTotalUsd", "usage_total_usd") == 0.01
+    assert ac._status(run) == "SUCCEEDED"
+    assert ac._rget({"defaultDatasetId": "d2"}, "defaultDatasetId", "default_dataset_id") == "d2"
+
+def test_rel_date():
+    ref = dt.datetime(2026, 11, 2, tzinfo=dt.timezone.utc)
+    assert ac.rel_date("2 months ago", ref).date() == dt.date(2026, 9, 2)
+    assert ac.rel_date("1 year ago (edited)", ref).year == 2025
+    assert ac.rel_date("3 minggu yang lalu", ref).date() == dt.date(2026, 10, 12)
+    assert ac.rel_date("", ref) is None and ac.rel_date("baru saja", ref) is None

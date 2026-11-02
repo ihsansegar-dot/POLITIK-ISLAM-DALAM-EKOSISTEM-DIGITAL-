@@ -87,11 +87,11 @@ media:
 
 # Apify (apify_collect.py) - keputusan peneliti 2 Nov 2026: X hanya akun partai; batas biaya keras $30.
 apify:
-  max_usd: 30
-  posts_per_month: 5          # target sampel IG/YouTube per akun per bulan (urutan komentar diacak bila anggaran habis)
-  comments_per_post: 20
+  max_usd: 4.5                # Apify Free Plan (~$5 kredit/bulan): versi diperkecil
+  posts_per_month: 1          # sampel IG/YouTube per akun per bulan (diperkecil; semula 5)
+  comments_per_post: 10
   min_comments: 1
   seed: 2029
-  ig_feed_limit: 1000         # post IG terbaru per akun yang ditelusuri (Jan 2024 - sekarang)
-  yt_feed_limit: 400
-  x_max_tweets_per_account: 600
+  ig_feed_limit: 120          # post IG terbaru per akun (diperkecil; bulan lama mungkin tak tercakup)
+  yt_feed_limit: 80
+  x_max_tweets_per_account: 60   # Free Plan: Actor X memberi maks. 10 tweet per run

@@ -630,7 +630,7 @@ function rebuild(){
       (NETS.some(t=>S.nets[t].betwSkipped)?' Betweenness dilewati karena graf terlalu besar; <button class="btn" id="forceB" type="button">hitung tetap</button>':'');
     status(msg, (sk||S.parseNote||dateNote)?'warn':'');
     const fb=$('forceB'); if(fb) fb.onclick=()=>{ for(const t of NETS){ const n=S.nets[t]; n.forceBetw=true; status('Menghitung betweenness…'); } setTimeout(()=>{ for(const t of NETS){ const n=S.nets[t]; const b=L.metrics.centrality.betweenness(n.g,{getEdgeWeight:null,normalized:true}); for(const k in b) n.M[k].betw=b[k]||0; n.betwSkipped=false; } status('Betweenness selesai dihitung.'); renderAll(false); },30); };
-    $('dataPill').textContent = S.source.startsWith('Contoh') ? 'contoh sintetis' : (S.source.startsWith('Data penelitian') ? 'data nyata · TikTok, IG, YouTube, X: sampel interim terbaru (1–2 Nov 2026) · media online: arsip Jan 2024–Nov 2026' : 'data unggahan');
+    $('dataPill').textContent = S.source.startsWith('Contoh') ? 'contoh sintetis' : (S.source.startsWith('Data penelitian') ? 'data nyata · IG, YouTube, X: Apify (sampel kecil, 2 Nov 2026) · TikTok: sampel interim · media online: arsip Jan 2024–Nov 2026' : 'data unggahan');
     $('dataPill').className = 'pill' + (S.source.startsWith('Contoh') ? '' : ' live');
     const maxN=Math.max(...NETS.map(t=>S.nets[t].g.order),20);
     const mx=$('maxNodes'); mx.max=Math.max(20,Math.ceil(maxN/10)*10);

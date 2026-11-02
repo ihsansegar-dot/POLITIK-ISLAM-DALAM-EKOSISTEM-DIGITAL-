@@ -14,7 +14,7 @@ Keputusan peneliti (2 Nov 2026):
 Anonimisasi: ID pseudonim HMAC-SHA256 dengan ANON_SALT yang sama dengan sc_pipeline (konsisten lintas sumber).
 Token: variabel lingkungan APIFY_TOKEN (dibaca dari APIFY_TOKEN.txt oleh skrip PowerShell; jangan ditaruh di repo).
 """
-import csv, datetime as dt, hashlib, hmac, json, os, random, re, sys, time
+import csv, datetime as dt, hashlib, hmac, json, math, os, random, re, sys, time
 from collections import defaultdict
 from pathlib import Path
 
@@ -66,7 +66,47 @@ def parse_date(x):
     except ValueError: return None
 
 
+_REL_UNIT = {"second": 1 / 86400, "detik": 1 / 86400, "minute": 1 / 1440, "menit": 1 / 1440, "hour": 1 / 24, "jam": 1 / 24,
+             "day": 1, "hari": 1, "week": 7, "minggu": 7, "month": 30.44, "bulan": 30.44, "year": 365.25, "tahun": 365.25}
+
+
+def rel_date(txt, ref):
+    """'3 weeks ago' / '2 bulan yang lalu' -> perkiraan tanggal (presisi kasar: setengah satuan)."""
+    if not txt: return None
+    m = re.search(r"(\d+)\s*([a-z]+)", str(txt).lower())
+    if not m: return None
+    unit = next((v for k, v in _REL_UNIT.items() if m.group(2).startswith(k)), None)
+    return ref - dt.timedelta(days=int(m.group(1)) * unit) if unit else None
+
+
 # ----------------------------------------------------------------------------- Apify
+MIN_RUN_USD = 0.50
+
+
+def _call(actor_client, run_input, n):
+    """apify-client v1/v2 pakai timeout_secs (int); v3 pakai run_timeout (timedelta)."""
+    import inspect
+    params = inspect.signature(actor_client.call).parameters
+    kw = {"run_input": run_input, "max_items": n}
+    if "run_timeout" in params:
+        kw["run_timeout"] = dt.timedelta(seconds=3600)
+    elif "timeout_secs" in params:
+        kw["timeout_secs"] = 3600
+    return actor_client.call(**kw)
+
+
+def _rget(run, camel, snake):
+    """Run v1/v2 = dict (camelCase); v3 = model pydantic (snake_case)."""
+    if run is None: return None
+    if isinstance(run, dict): return run.get(camel, run.get(snake))
+    return getattr(run, snake, None)
+
+
+def _status(run):
+    st = _rget(run, "status", "status")
+    return getattr(st, "value", st) if st is not None else None
+
+
 class Runner:
     def __init__(self, a, state, client=None):
         self.a, self.s = a, state
@@ -85,13 +125,18 @@ class Runner:
         afford = int(self.left() / price * 1000)
         n = min(max_items, afford)
         if n <= 0: raise BudgetExceeded(f"anggaran ${self.a['max_usd']} habis (terpakai ${self.s['usd']:.2f})")
-        run = self.client.actor(actor).call(run_input=run_input, max_items=n, timeout_secs=3600)
-        items = list(self.client.dataset(run["defaultDatasetId"]).iterate_items()) if run else []
-        cost = run.get("usageTotalUsd") if run else None
+        # Apify menolak run bila batas biaya (max_items x harga) < $0.50; jumlah hasil tetap dibatasi
+        # oleh parameter input Actor (resultsLimit / maxComments / maxItems), jadi lantai ini aman.
+        floor = math.ceil(MIN_RUN_USD / price * 1000) + 1
+        n_req = max(n, floor) if self.left() >= MIN_RUN_USD else n
+        run = _call(self.client.actor(actor), run_input, n_req)
+        ds = _rget(run, "defaultDatasetId", "default_dataset_id")
+        items = list(self.client.dataset(ds).iterate_items()) if ds else []
+        cost = _rget(run, "usageTotalUsd", "usage_total_usd")
         est = len(items) * price / 1000
         self.s["usd"] += max(cost or 0, est)
-        self.s["runs"].append({"key": key, "tag": tag, "run_id": (run or {}).get("id"), "items": len(items),
-                               "usd_est": round(est, 4), "usd_reported": cost, "status": (run or {}).get("status"),
+        self.s["runs"].append({"key": key, "tag": tag, "run_id": _rget(run, "id", "id"), "items": len(items),
+                               "usd_est": round(est, 4), "usd_reported": cost, "status": _status(run),
                                "at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")})
         RAW.mkdir(parents=True, exist_ok=True)
         safe = re.sub(r"[^\w.-]+", "_", tag)[:80]
@@ -248,6 +293,7 @@ def cmd_build(c, a):
     keep = {(pl, s["handle"].lower()): f"{party}_{pl}_official" for party, ps in c["seeds"].items() for pl, s in ps.items() if s.get("handle")}
     anon = Anon(os.environ.get("ANON_SALT"), keep)
     owner = {}   # url konten -> (id pemilik, partai, caption)
+    cdate = {}   # url konten -> tanggal unggah (batas bawah tanggal komentar)
     rows, names, seen = [], {}, set()
     with_text = c.get("sna_export_text", True)
 
@@ -263,7 +309,7 @@ def cmd_build(c, a):
                          target_user=tgt, created_at=when.isoformat() if when else "", platform=pl, party=party,
                          interaction=itype, content_url=url))
 
-    files = sorted(RAW.glob("*.json"))
+    files = sorted(RAW.glob("*.json")); approx = 0
     seedp = {(pl, s["handle"].lower()): party for party, ps in c["seeds"].items() for pl, s in ps.items() if s.get("handle")}
     for f in files:  # feed dulu agar pemilik konten diketahui
         d = json.loads(f.read_text(encoding="utf-8"))
@@ -276,6 +322,7 @@ def cmd_build(c, a):
                     for (p2, hh), pt in seedp.items():
                         if p2 == pl and hh in json.dumps(d["input"]).lower(): party = pt; h = hh
                 owner[it.get("url")] = (acct(pl, None, h), party, it.get("caption") or it.get("title") or "")
+                cdate[it.get("url")] = parse_date(it.get("timestamp") or it.get("date"))
     for f in files:
         d = json.loads(f.read_text(encoding="utf-8")); k = d["key"]
         if k == "ig_comments":
@@ -292,6 +339,7 @@ def cmd_build(c, a):
                     add(rsrc, src, "instagram", "reply", parse_date(rp.get("timestamp")), rp.get("text"), party, url, "ig:" + str(rp.get("id")))
         elif k == "yt_comments":
             byc = {}
+            ref = dt.datetime.fromtimestamp(f.stat().st_mtime, dt.timezone.utc)
             for cm in d["items"]:
                 url = cm.get("pageUrl") or cm.get("url") or ""
                 vid = cm.get("videoId") or ""
@@ -302,6 +350,11 @@ def cmd_build(c, a):
                 parent = byc.get(cm.get("replyToCid")) if cm.get("replyToCid") else None
                 # tanggal YouTube relatif ("2 tahun lalu") -> dibiarkan kosong bila tidak bisa dibaca; date_precision dicatat di audit
                 when = parse_date(cm.get("publishedAt") or cm.get("date"))
+                if when is None:  # YouTube hanya memberi "2 months ago": perkiraan relatif thd waktu pengambilan
+                    when = rel_date(cm.get("publishedTimeText"), ref)
+                    vd = cdate.get(url) or next((v for u, v in cdate.items() if vid and vid in (u or "")), None)
+                    if when and vd and when < vd: when = vd
+                    if when: approx += 1
                 add(src, parent or own, "youtube", "reply" if parent else "comment", when, cm.get("comment") or cm.get("text"), party,
                     url, "yt:" + str(cm.get("cid")))
         elif k == "x_tweets":
@@ -339,7 +392,7 @@ def cmd_build(c, a):
     from collections import Counter
     cnt = Counter((r["platform"], r["interaction"]) for r in rows)
     undated = sum(1 for r in rows if not r["created_at"])
-    print(f"[build] {len(rows)} baris -> {OUT / 'sna_apify.csv'}; {dict(cnt)}; tanpa tanggal: {undated}", flush=True)
+    print(f"[build] {len(rows)} baris -> {OUT / 'sna_apify.csv'}; {dict(cnt)}; tanpa tanggal: {undated}; tanggal YouTube perkiraan (relatif): {approx}", flush=True)
 
 
 if __name__ == "__main__":
